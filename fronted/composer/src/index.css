@@ -1,0 +1,35 @@
+:root {
+  font-family:
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #0f172a;
+  background: #eef3fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  background: #eef3fb;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
