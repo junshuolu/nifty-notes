@@ -4,7 +4,7 @@ import {
 } from './constants'
 import {
   getDurationPreviewClass,
-  getPitchLabel,
+  getPitchLabels,
 } from './score'
 
 export function CursorPreview({
@@ -34,7 +34,7 @@ export function CursorPreview({
         ) : null}
         {dotted ? <span className="cursor-dot" /> : null}
       </div>
-      <div className="cursor-label">{getPitchLabel(preview.pitch)}</div>
+      <div className="cursor-label">{getPitchLabels(preview.pitches)}</div>
     </div>
   )
 }

@@ -20,30 +20,31 @@ import './App.css'
 import { CursorPreview } from './composer/CursorPreview'
 import {
   ACTIVE_COLOR,
-  BASE_DURATION_SUBDIVISIONS,
   BPM,
   DURATION_OPTIONS,
   ERASE_HOVER_COLOR,
   GRAND_STAFF_GAP,
   NOTE_COLOR,
   PIANO_SAMPLE_URLS,
-  PLACEHOLDER_COLOR,
+  PLACEHOLDER_DURATIONS,
   SCORE_PADDING_BOTTOM,
   STAFF_IDS,
   SUBDIVISIONS_PER_BEAT,
-  SUBDIVISIONS_PER_MEASURE,
   SYSTEM_GAP_Y,
   SYSTEM_SIDE_PADDING,
-  SYSTEM_TOP,
   SYSTEM_WRAP_WIDTH,
+  TIME_SIGNATURE_OPTIONS,
   type BaseDuration,
   type EditMode,
   type HoverPreview,
   type MeasureData,
   type MeasureHitBox,
+  type NoteItem,
   type NotePitch,
+  type RenderDuration,
   type ScoreItem,
   type StaffId,
+  type TimeSignature,
   createMeasure,
   initialMeasures,
 } from './composer/constants'
@@ -56,16 +57,22 @@ import {
   findNextContiguousItem,
   findNextStartingItem,
   findStartingItem,
+  getBeatsPerMeasure,
+  getChordStemDirection,
   getDurationName,
   getDurationSubdivisions,
   getItemSubdivisions,
   getItemsForStaff,
+  getMeasureSubdivisions,
   getPitchLabel,
+  getPitchLabels,
+  haveSamePitches,
   itemEnd,
   normalizeMeasures,
   pitchToY,
   rangesOverlap,
   snapSubdivision,
+  sortPitches,
   toTonePitch,
   yToPitch,
 } from './composer/score'
@@ -86,16 +93,16 @@ function createVisualNote(
   staffId: StaffId,
   activeItemId: string | null,
   eraseHoverItemId: string | null,
-  noteRegistry: Map<string, StaveNote>,
+  noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>,
 ): StaveNote {
   const note =
     item.kind === 'note'
       ? new StaveNote({
-          autoStem: true,
           clef: staffId,
           dots: item.dots,
           duration: item.baseDuration,
-          keys: [item.pitch ?? getRestKey(staffId)],
+          keys: item.pitches,
+          stemDirection: getChordStemDirection(item.pitches, staffId),
         })
       : new StaveNote({
           clef: staffId,
@@ -122,13 +129,17 @@ function createVisualNote(
   styleNote(note, color)
 
   if (item.kind === 'note') {
-    noteRegistry.set(item.id, note)
+    noteRegistry.set(item.id, { item, note })
   }
 
   return note
 }
 
-function createPlaceholder(baseDuration: BaseDuration, staffId: StaffId): StaveNote {
+function createPlaceholder(
+  baseDuration: RenderDuration,
+  staffId: StaffId,
+  color: string,
+): StaveNote {
   const placeholder = new StaveNote({
     clef: staffId,
     duration: baseDuration,
@@ -136,36 +147,47 @@ function createPlaceholder(baseDuration: BaseDuration, staffId: StaffId): StaveN
     type: 'r',
   })
 
-  styleNote(placeholder, PLACEHOLDER_COLOR)
+  styleNote(placeholder, color)
   return placeholder
 }
 
-function createAnchorNotes(): GhostNote[] {
-  return Array.from({ length: SUBDIVISIONS_PER_MEASURE }, () => new GhostNote('16'))
+function createAnchorNotes(subdivisionsPerMeasure: number): GhostNote[] {
+  return Array.from({ length: subdivisionsPerMeasure }, () => new GhostNote('32'))
 }
 
 function getPlaceholderDuration(
   items: ScoreItem[],
   subdivision: number,
-): BaseDuration {
+  subdivisionsPerMeasure: number,
+): RenderDuration {
   const nextStart =
-    findNextStartingItem(items, subdivision - 1)?.start ?? SUBDIVISIONS_PER_MEASURE
-  const roomUntilNext = nextStart - subdivision
-  const roomUntilBeat = SUBDIVISIONS_PER_BEAT - (subdivision % SUBDIVISIONS_PER_BEAT)
+    findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
+  const maxLength = Math.min(
+    nextStart - subdivision,
+    subdivisionsPerMeasure - subdivision,
+  )
+  const offsetWithinBeat = subdivision % SUBDIVISIONS_PER_BEAT
+  const roomUntilBeat =
+    offsetWithinBeat === 0 ? SUBDIVISIONS_PER_BEAT : SUBDIVISIONS_PER_BEAT - offsetWithinBeat
 
   if (
-    subdivision % SUBDIVISIONS_PER_BEAT === 0 &&
-    roomUntilNext >= 4 &&
-    roomUntilBeat >= 4
+    offsetWithinBeat === 0 &&
+    maxLength >= getDurationSubdivisions('q', false)
   ) {
     return 'q'
   }
 
-  if (subdivision % 2 === 0 && roomUntilNext >= 2 && roomUntilBeat >= 2) {
-    return '8'
-  }
+  return (
+    PLACEHOLDER_DURATIONS.find((duration) => {
+      const length = getDurationSubdivisions(duration, false)
 
-  return '16'
+      if (length > maxLength) {
+        return false
+      }
+
+      return offsetWithinBeat === 0 || length <= roomUntilBeat
+    }) ?? '32'
+  )
 }
 
 function buildStaffVoiceData(
@@ -173,15 +195,20 @@ function buildStaffVoiceData(
   staffId: StaffId,
   activeItemId: string | null,
   eraseHoverItemId: string | null,
-  noteRegistry: Map<string, StaveNote>,
+  noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>,
+  subdivisionsPerMeasure: number,
 ) {
   const notes: StaveNote[] = []
+  const lengths: number[] = []
+  const starts: number[] = []
   let subdivision = 0
 
-  while (subdivision < SUBDIVISIONS_PER_MEASURE) {
+  while (subdivision < subdivisionsPerMeasure) {
     const item = findStartingItem(items, subdivision)
 
     if (item) {
+      lengths.push(getItemSubdivisions(item))
+      starts.push(item.start)
       notes.push(
         createVisualNote(
           item,
@@ -195,14 +222,22 @@ function buildStaffVoiceData(
       continue
     }
 
-    const placeholderDuration = getPlaceholderDuration(items, subdivision)
-    notes.push(createPlaceholder(placeholderDuration, staffId))
-    subdivision += BASE_DURATION_SUBDIVISIONS[placeholderDuration]
+    const placeholderDuration = getPlaceholderDuration(
+      items,
+      subdivision,
+      subdivisionsPerMeasure,
+    )
+    lengths.push(getDurationSubdivisions(placeholderDuration, false))
+    starts.push(subdivision)
+    notes.push(createPlaceholder(placeholderDuration, staffId, NOTE_COLOR))
+    subdivision += getDurationSubdivisions(placeholderDuration, false)
   }
 
   return {
-    anchorNotes: createAnchorNotes(),
+    anchorNotes: createAnchorNotes(subdivisionsPerMeasure),
+    lengths,
     notes,
+    starts,
   }
 }
 
@@ -241,16 +276,49 @@ function resolveClosestSubdivision(xBySubdivision: number[], x: number) {
   return bestIndex
 }
 
-function applyFixedSubdivisionGrid(stave: Stave, anchorNotes: GhostNote[]) {
+function applyFixedSubdivisionGrid(
+  stave: Stave,
+  anchorNotes: GhostNote[],
+  subdivisionsPerMeasure: number,
+) {
   const stavePadding = Metrics.get('Stave.padding', 0)
   const usableWidth = stave.getNoteEndX() - stave.getNoteStartX()
-  const subdivisionWidth = usableWidth / SUBDIVISIONS_PER_MEASURE
+  const subdivisionWidth = usableWidth / subdivisionsPerMeasure
 
   return anchorNotes.map((note, subdivision) => {
     const relativeX = subdivisionWidth * subdivision + subdivisionWidth / 2
     const absoluteX = stave.getNoteStartX() + stavePadding + relativeX
     note.getTickContext().setX(relativeX)
     return absoluteX
+  })
+}
+
+function positionTickablesOnGrid(
+  stave: Stave,
+  notes: StaveNote[],
+  lengths: number[],
+  starts: number[],
+  xBySubdivision: number[],
+) {
+  const stavePadding = Metrics.get('Stave.padding', 0)
+
+  notes.forEach((note, index) => {
+    const subdivision = starts[index] ?? 0
+    const length = lengths[index] ?? 1
+    const lastSubdivision = Math.min(
+      subdivision + Math.max(length - 1, 0),
+      xBySubdivision.length - 1,
+    )
+    const startX = xBySubdivision[subdivision]
+    const endX = xBySubdivision[lastSubdivision]
+
+    if (startX === undefined || endX === undefined) {
+      return
+    }
+
+    const anchorX = (startX + endX) / 2
+    const relativeX = anchorX - stave.getNoteStartX() - stavePadding
+    note.getTickContext().setX(relativeX)
   })
 }
 
@@ -261,6 +329,7 @@ function App() {
   const pianoLoaderRef = useRef<Promise<Tone.Sampler> | null>(null)
   const playbackTimerRef = useRef<number | null>(null)
   const [measures, setMeasures] = useState<MeasureData[]>(initialMeasures)
+  const [timeSignature, setTimeSignature] = useState<TimeSignature>('4/4')
   const [mode, setMode] = useState<EditMode>('note')
   const [baseDuration, setBaseDuration] = useState<BaseDuration>('q')
   const [dotted, setDotted] = useState(false)
@@ -268,14 +337,17 @@ function App() {
   const [eraseHoverItemId, setEraseHoverItemId] = useState<string | null>(null)
   const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null)
   const [status, setStatus] = useState(
-    'Click a note shape, then click either staff to insert on treble or bass.',
+    'Choose a duration, then click either staff to add notes, rests, or chords.',
   )
   const [isPlaying, setIsPlaying] = useState(false)
 
   const systems = buildSystems(measures)
+  const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
+  const beatsPerMeasure = getBeatsPerMeasure(timeSignature)
+  const scoreTop = 36
   const scoreWidth = SYSTEM_WRAP_WIDTH
   const scoreHeight =
-    SYSTEM_TOP +
+    scoreTop +
     (systems.length - 1) * SYSTEM_GAP_Y +
     GRAND_STAFF_GAP +
     120 +
@@ -305,12 +377,12 @@ function App() {
     renderer.resize(scoreWidth, scoreHeight)
 
     const context = renderer.getContext()
-    const noteRegistry = new Map<string, StaveNote>()
+    const noteRegistry = new Map<string, { item: NoteItem; note: StaveNote }>()
     const hitBoxes: MeasureHitBox[] = []
 
     systems.forEach((system, systemIndex) => {
       let currentX = SYSTEM_SIDE_PADDING
-      const trebleY = SYSTEM_TOP + systemIndex * SYSTEM_GAP_Y
+      const trebleY = scoreTop + systemIndex * SYSTEM_GAP_Y
       const bassY = trebleY + GRAND_STAFF_GAP
 
       system.forEach((entry, measureInSystem) => {
@@ -324,8 +396,8 @@ function App() {
           bassStave.addClef('bass')
 
           if (systemIndex === 0) {
-            trebleStave.addTimeSignature('4/4')
-            bassStave.addTimeSignature('4/4')
+            trebleStave.addTimeSignature(timeSignature)
+            bassStave.addTimeSignature(timeSignature)
           }
         }
 
@@ -360,6 +432,7 @@ function App() {
           activeItemId,
           eraseHoverItemId,
           noteRegistry,
+          subdivisionsPerMeasure,
         )
         const bassData = buildStaffVoiceData(
           entry.measure.bassItems,
@@ -367,19 +440,22 @@ function App() {
           activeItemId,
           eraseHoverItemId,
           noteRegistry,
+          subdivisionsPerMeasure,
         )
 
-        const trebleVoice = new Voice({ beatValue: 4, numBeats: 4 })
-        const bassVoice = new Voice({ beatValue: 4, numBeats: 4 })
-        const trebleAnchorVoice = new Voice({ beatValue: 4, numBeats: 4 })
-        const bassAnchorVoice = new Voice({ beatValue: 4, numBeats: 4 })
+        const trebleVoice = new Voice({ beatValue: 4, numBeats: beatsPerMeasure })
+        const bassVoice = new Voice({ beatValue: 4, numBeats: beatsPerMeasure })
+        const trebleAnchorVoice = new Voice({ beatValue: 4, numBeats: beatsPerMeasure })
+        const bassAnchorVoice = new Voice({ beatValue: 4, numBeats: beatsPerMeasure })
 
         trebleVoice.addTickables(trebleData.notes).setStave(trebleStave)
         bassVoice.addTickables(bassData.notes).setStave(bassStave)
         trebleAnchorVoice
           .addTickables(trebleData.anchorNotes)
           .setStave(trebleStave)
-        bassAnchorVoice.addTickables(bassData.anchorNotes).setStave(bassStave)
+        bassAnchorVoice
+          .addTickables(bassData.anchorNotes)
+          .setStave(bassStave)
 
         const formatter = new Formatter()
         formatter.joinVoices([trebleVoice, trebleAnchorVoice])
@@ -388,7 +464,7 @@ function App() {
           [trebleVoice, trebleAnchorVoice, bassVoice, bassAnchorVoice],
           trebleStave.getNoteEndX() - trebleStave.getNoteStartX(),
           {
-            alignRests: true,
+            alignRests: false,
             context,
           },
         )
@@ -396,6 +472,7 @@ function App() {
         const xBySubdivision = applyFixedSubdivisionGrid(
           trebleStave,
           trebleData.anchorNotes,
+          subdivisionsPerMeasure,
         )
 
         bassData.anchorNotes.forEach((note, subdivision) => {
@@ -406,13 +483,29 @@ function App() {
           note.getTickContext().setX(relativeX)
         })
 
+        positionTickablesOnGrid(
+          trebleStave,
+          trebleData.notes,
+          trebleData.lengths,
+          trebleData.starts,
+          xBySubdivision,
+        )
+        positionTickablesOnGrid(
+          bassStave,
+          bassData.notes,
+          bassData.lengths,
+          bassData.starts,
+          xBySubdivision,
+        )
+
+        const beamGroups = [new Fraction(1, 4)]
         const trebleBeams = Beam.generateBeams(trebleData.notes, {
           beamRests: false,
-          groups: [new Fraction(1, 4)],
+          groups: beamGroups,
         })
         const bassBeams = Beam.generateBeams(bassData.notes, {
           beamRests: false,
-          groups: [new Fraction(1, 4)],
+          groups: beamGroups,
         })
 
         trebleVoice.draw(context, trebleStave)
@@ -455,23 +548,33 @@ function App() {
             return
           }
 
-          const next = findNextContiguousItem(measures, measureIndex, staffId, item)
-          if (!next || next.item.kind !== 'note' || item.pitch !== next.item.pitch) {
+          const next = findNextContiguousItem(
+            measures,
+            measureIndex,
+            staffId,
+            item,
+            subdivisionsPerMeasure,
+          )
+          if (
+            !next ||
+            next.item.kind !== 'note' ||
+            !haveSamePitches(item.pitches, next.item.pitches)
+          ) {
             return
           }
 
-          const firstNote = noteRegistry.get(item.id)
-          const lastNote = noteRegistry.get(next.item.id)
+          const firstEntry = noteRegistry.get(item.id)
+          const lastEntry = noteRegistry.get(next.item.id)
 
-          if (!firstNote || !lastNote) {
+          if (!firstEntry || !lastEntry) {
             return
           }
 
           new StaveTie({
-            firstIndexes: [0],
-            firstNote,
-            lastIndexes: [0],
-            lastNote,
+            firstIndexes: firstEntry.item.pitches.map((_, index) => index),
+            firstNote: firstEntry.note,
+            lastIndexes: lastEntry.item.pitches.map((_, index) => index),
+            lastNote: lastEntry.note,
           })
             .setContext(context)
             .draw()
@@ -480,7 +583,18 @@ function App() {
     })
 
     hitBoxesRef.current = hitBoxes
-  }, [activeItemId, eraseHoverItemId, measures, scoreHeight, scoreWidth, systems])
+  }, [
+    activeItemId,
+    beatsPerMeasure,
+    eraseHoverItemId,
+    measures,
+    scoreHeight,
+    scoreTop,
+    scoreWidth,
+    subdivisionsPerMeasure,
+    systems,
+    timeSignature,
+  ])
 
   async function ensurePiano() {
     if (Tone.context.state !== 'running') {
@@ -520,6 +634,19 @@ function App() {
     setEraseHoverItemId(null)
   }
 
+  function replaceStaffItems(
+    draft: MeasureData[],
+    measureIndex: number,
+    staffId: StaffId,
+    items: ScoreItem[],
+  ) {
+    if (staffId === 'treble') {
+      draft[measureIndex].trebleItems = items
+    } else {
+      draft[measureIndex].bassItems = items
+    }
+  }
+
   function mutateMeasures(
     updater: (draft: MeasureData[]) => {
       activeItemId?: string | null
@@ -529,7 +656,7 @@ function App() {
     setMeasures((current) => {
       const draft = cloneMeasures(current)
       const result = updater(draft)
-      const normalized = normalizeMeasures(draft)
+      const normalized = normalizeMeasures(draft, subdivisionsPerMeasure)
 
       if (result.activeItemId !== undefined) {
         setActiveItemId(result.activeItemId)
@@ -559,32 +686,88 @@ function App() {
     pitch: NotePitch,
     kind: 'note' | 'rest',
   ) {
-    const start = snapSubdivision(rawSubdivision, baseDuration, dotted)
     const length = getDurationSubdivisions(baseDuration, dotted)
+
+    if (length > subdivisionsPerMeasure) {
+      setStatus(`${selectedDurationName} does not fit inside ${timeSignature}.`)
+      return
+    }
+
+    const start = snapSubdivision(
+      rawSubdivision,
+      baseDuration,
+      dotted,
+      subdivisionsPerMeasure,
+    )
 
     mutateMeasures((draft) => {
       const items = getItemsForStaff(draft[measureIndex], staffId)
       const end = start + length
+      const exactStartItem = findStartingItem(items, start)
+      const matchingStartItem =
+        exactStartItem &&
+        exactStartItem.baseDuration === baseDuration &&
+        exactStartItem.dots === (dotted ? 1 : 0)
+          ? exactStartItem
+          : undefined
+
+      if (kind === 'note' && matchingStartItem?.kind === 'note') {
+        const pitchExists = matchingStartItem.pitches.includes(pitch)
+        const nextPitches = sortPitches(
+          pitchExists
+            ? matchingStartItem.pitches.filter((value) => value !== pitch)
+            : [...matchingStartItem.pitches, pitch],
+          staffId,
+        )
+
+        if (nextPitches.length === 0) {
+          replaceStaffItems(
+            draft,
+            measureIndex,
+            staffId,
+            items.filter((item) => item.id !== matchingStartItem.id),
+          )
+
+          return {
+            activeItemId: null,
+            status: `Removed ${getPitchLabel(pitch)} from the ${staffId} chord.`,
+          }
+        }
+
+        matchingStartItem.pitches = nextPitches
+
+        return {
+          activeItemId: matchingStartItem.id,
+          status: pitchExists
+            ? `Updated ${staffId} chord: ${getPitchLabels(nextPitches)}.`
+            : `Expanded ${staffId} chord: ${getPitchLabels(nextPitches)}.`,
+        }
+      }
+
       const filtered = items.filter(
         (item) => !rangesOverlap(item.start, itemEnd(item), start, end),
       )
 
-      const inserted: ScoreItem = {
-        baseDuration,
-        dots: dotted ? 1 : 0,
-        id: crypto.randomUUID(),
-        kind,
-        pitch: kind === 'note' ? pitch : undefined,
-        start,
-      }
+      const inserted: ScoreItem =
+        kind === 'note'
+          ? {
+              baseDuration,
+              dots: dotted ? 1 : 0,
+              id: crypto.randomUUID(),
+              kind,
+              pitches: [pitch],
+              start,
+            }
+          : {
+              baseDuration,
+              dots: dotted ? 1 : 0,
+              id: crypto.randomUUID(),
+              kind,
+              start,
+            }
 
       filtered.push(inserted)
-
-      if (staffId === 'treble') {
-        draft[measureIndex].trebleItems = filtered
-      } else {
-        draft[measureIndex].bassItems = filtered
-      }
+      replaceStaffItems(draft, measureIndex, staffId, filtered)
 
       return {
         activeItemId: inserted.id,
@@ -616,12 +799,12 @@ function App() {
         }
       }
 
-      const filtered = items.filter((item) => item.id !== target.id)
-      if (staffId === 'treble') {
-        draft[measureIndex].trebleItems = filtered
-      } else {
-        draft[measureIndex].bassItems = filtered
-      }
+      replaceStaffItems(
+        draft,
+        measureIndex,
+        staffId,
+        items.filter((item) => item.id !== target.id),
+      )
 
       return {
         activeItemId: null,
@@ -642,23 +825,29 @@ function App() {
       if (!target || target.kind !== 'note') {
         return {
           activeItemId: null,
-          status: 'Tie mode requires an existing note.',
+          status: 'Tie mode requires an existing note or chord.',
         }
       }
 
-      const next = findNextContiguousItem(draft, measureIndex, staffId, target)
+      const next = findNextContiguousItem(
+        draft,
+        measureIndex,
+        staffId,
+        target,
+        subdivisionsPerMeasure,
+      )
 
       if (!next || next.item.kind !== 'note') {
         return {
           activeItemId: target.id,
-          status: 'There is no contiguous note after this one.',
+          status: 'There is no contiguous note or chord after this one.',
         }
       }
 
-      if (next.item.pitch !== target.pitch) {
+      if (!haveSamePitches(next.item.pitches, target.pitches)) {
         return {
           activeItemId: target.id,
-          status: 'This prototype only ties notes with the same pitch.',
+          status: 'Ties require the next note or chord to use the same pitches.',
         }
       }
 
@@ -691,9 +880,22 @@ function App() {
     }
 
     const rawSubdivision = resolveClosestSubdivision(hitBox.xBySubdivision, x)
-    const snappedSubdivision = snapSubdivision(rawSubdivision, baseDuration, dotted)
-    const previewX =
+    const snappedSubdivision = snapSubdivision(
+      rawSubdivision,
+      baseDuration,
+      dotted,
+      subdivisionsPerMeasure,
+    )
+    const previewLength = getDurationSubdivisions(baseDuration, dotted)
+    const previewLastSubdivision = Math.min(
+      snappedSubdivision + Math.max(previewLength - 1, 0),
+      hitBox.xBySubdivision.length - 1,
+    )
+    const previewStartX =
       hitBox.xBySubdivision[snappedSubdivision] ?? hitBox.xBySubdivision[0] ?? hitBox.left
+    const previewEndX =
+      hitBox.xBySubdivision[previewLastSubdivision] ?? previewStartX
+    const previewX = (previewStartX + previewEndX) / 2
     const pitch = yToPitch(y, hitBox.topLineY, hitBox.spacing, hitBox.staffId)
     const previewY = pitchToY(
       pitch,
@@ -729,7 +931,7 @@ function App() {
 
     if (mode === 'note') {
       setHoverPreview({
-        pitch: pointerTarget.pitch,
+        pitches: [pointerTarget.pitch],
         x: pointerTarget.previewX,
         y: pointerTarget.previewY,
       })
@@ -811,7 +1013,7 @@ function App() {
       return
     }
 
-    const notes = buildPlaybackNotes(measures)
+    const notes = buildPlaybackNotes(measures, timeSignature)
     if (notes.length === 0) {
       setStatus('There are no notes to play yet.')
       return
@@ -833,7 +1035,7 @@ function App() {
 
     notes.forEach((segment) => {
       piano.triggerAttackRelease(
-        segment.note,
+        segment.notes,
         segment.durationSeconds * 0.96,
         startTime + segment.startSeconds,
       )
@@ -854,15 +1056,23 @@ function App() {
     }, (totalDuration + 0.3) * 1000)
 
     setIsPlaying(true)
-    setStatus('Playing the grand staff with piano samples.')
+    setStatus('Playing Nifty Notes with piano samples.')
   }
 
   function selectDuration(nextDuration: BaseDuration) {
     setBaseDuration(nextDuration)
+  }
 
-    if (!canUseDot(nextDuration)) {
-      setDotted(false)
+  function changeTimeSignature(nextTimeSignature: TimeSignature) {
+    if (nextTimeSignature === timeSignature) {
+      return
     }
+
+    setTimeSignature(nextTimeSignature)
+    setMeasures((current) => current.map((measure) => createMeasure(measure.id)))
+    setActiveItemId(null)
+    clearHoverState()
+    setStatus(`Switched to ${nextTimeSignature}. Existing notes were cleared.`)
   }
 
   function addMeasure() {
@@ -870,7 +1080,7 @@ function App() {
       ...current,
       createMeasure(`measure-${current.length + 1}`),
     ])
-    setStatus('Added one bar. The layout will wrap to a new system automatically.')
+    setStatus('Added one bar. The layout wraps automatically as the score grows.')
   }
 
   function removeMeasure() {
@@ -880,7 +1090,7 @@ function App() {
         return current
       }
 
-      return normalizeMeasures(current.slice(0, -1))
+      return normalizeMeasures(current.slice(0, -1), subdivisionsPerMeasure)
     })
 
     setActiveItemId(null)
@@ -891,11 +1101,10 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">///</div>
           <div>
-            <div className="brand-title">Composer Prototype</div>
+            <div className="brand-title">Nifty Notes</div>
             <div className="brand-subtitle">
-              VexFlow + Tone.js / Grand staff piano editor
+              Interactive grand staff piano composer
             </div>
           </div>
         </div>
@@ -904,7 +1113,7 @@ function App() {
           <button className="primary-pill" onClick={handlePlay} type="button">
             {isPlaying ? 'Stop' : 'Play'}
           </button>
-          <div className="tempo-chip">Piano · ♩ = {BPM}</div>
+          <div className="tempo-chip">Tempo {BPM} BPM</div>
         </div>
       </header>
 
@@ -917,7 +1126,9 @@ function App() {
                 key={option.baseDuration}
                 aria-label={option.label}
                 className={
-                  baseDuration === option.baseDuration ? 'tool tool--glyph active' : 'tool tool--glyph'
+                  baseDuration === option.baseDuration
+                    ? 'tool tool--glyph active'
+                    : 'tool tool--glyph'
                 }
                 onClick={() => selectDuration(option.baseDuration)}
                 title={option.label}
@@ -929,13 +1140,13 @@ function App() {
           </div>
 
           <div className="tool-group">
-            <span className="group-label">Modifier</span>
+            <span className="group-label">Dot</span>
             <button
-              aria-label="Dotted"
+              aria-label="Toggle dotted value"
               className={dotted ? 'tool tool--glyph active' : 'tool tool--glyph'}
               disabled={!dotEnabled}
               onClick={() => setDotted((current) => !current)}
-              title="Dotted"
+              title="Dot"
               type="button"
             >
               {buildDurationGlyph(baseDuration, true, 'dot-glyph')}
@@ -974,6 +1185,20 @@ function App() {
             </button>
           </div>
 
+          <div className="tool-group">
+            <span className="group-label">Meter</span>
+            {TIME_SIGNATURE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className={timeSignature === option.value ? 'tool active' : 'tool'}
+                onClick={() => changeTimeSignature(option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
           <div className="tool-group compact">
             <span className="group-label">Bars</span>
             <button className="tool" onClick={addMeasure} type="button">
@@ -1004,6 +1229,10 @@ function App() {
               <strong>{selectedDurationName}</strong>
             </div>
             <div className="summary-row">
+              <span>Meter</span>
+              <strong>{timeSignature}</strong>
+            </div>
+            <div className="summary-row">
               <span>Systems</span>
               <strong>{systems.length}</strong>
             </div>
@@ -1013,36 +1242,33 @@ function App() {
             </div>
           </section>
 
+          <section className="panel panel--status">
+            <h2>Status</h2>
+            <p className="status-copy">{status}</p>
+          </section>
+
           <section className="panel">
             <h2>What Changed</h2>
             <ul>
-              <li>Treble and bass now have separate editable note data.</li>
-              <li>Bar wrapping is automatic when a system gets too wide.</li>
-              <li>Hover preview now uses rendered 16th-note anchors.</li>
-              <li>Insert and preview positions are snapped to the same x map.</li>
+              <li>Nifty Notes now covers the 26-note range from C2 to G5.</li>
+              <li>4/4, 3/4, and 2/4 can be switched directly in the toolbar.</li>
+              <li>Click the same beat again to grow or trim a chord.</li>
+              <li>Playback now handles tied notes and full chords.</li>
             </ul>
           </section>
 
           <section className="panel">
             <h2>Interaction Notes</h2>
             <ul>
-              <li>Click the upper staff for treble notes and the lower for bass.</li>
-              <li>Erase mode highlights exactly what will be removed.</li>
-              <li>Empty areas still render placeholder rests to preserve spacing.</li>
+              <li>Choose a duration, then toggle Dot if you want the dotted version.</li>
+              <li>Treble and bass keep separate editable data on the grand staff.</li>
+              <li>Erase removes an entire note, chord, or rest at the hovered position.</li>
             </ul>
           </section>
         </aside>
 
         <section className="score-stage">
-          <div className="score-paper">
-            <div className="score-heading">
-              <div>
-                <div className="eyebrow">Piano Composer Demo</div>
-                <h1>My Score</h1>
-              </div>
-              <div className="status-box">{status}</div>
-            </div>
-
+          <div className="score-paper score-paper--empty">
             <div className="score-viewport">
               <div
                 className="score-surface"
@@ -1066,11 +1292,6 @@ function App() {
                   style={{ height: `${scoreHeight}px`, width: `${scoreWidth}px` }}
                 />
               </div>
-            </div>
-
-            <div className="footer-note">
-              Measure wrapping is automatic. When you add bars, the layout starts a
-              new piano system as soon as the current one runs out of room.
             </div>
           </div>
         </section>

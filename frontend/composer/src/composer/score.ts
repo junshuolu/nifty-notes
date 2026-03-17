@@ -1,21 +1,26 @@
+import { Stem } from 'vexflow'
 import {
   BASS_PITCHES_FROM_TOP,
   BASE_DURATION_SUBDIVISIONS,
   BPM,
   DURATION_OPTIONS,
   STAFF_IDS,
-  SUBDIVISIONS_PER_MEASURE,
+  SUBDIVISIONS_PER_BEAT,
   SYSTEM_FIRST_MEASURE_WIDTH,
   SYSTEM_MEASURE_WIDTH,
   SYSTEM_SIDE_PADDING,
   SYSTEM_WRAP_WIDTH,
+  TIME_SIGNATURE_OPTIONS,
   TREBLE_PITCHES_FROM_TOP,
   type BaseDuration,
   type ContiguousTarget,
   type MeasureData,
   type NotePitch,
+  type NoteItem,
+  type RenderDuration,
   type ScoreItem,
   type StaffId,
+  type TimeSignature,
 } from './constants'
 
 export function getItemsForStaff(
@@ -25,33 +30,32 @@ export function getItemsForStaff(
   return staffId === 'treble' ? measure.trebleItems : measure.bassItems
 }
 
-export function canUseDot(baseDuration: BaseDuration): boolean {
-  return baseDuration === 'h' || baseDuration === 'q' || baseDuration === '8'
+export function getBeatsPerMeasure(timeSignature: TimeSignature): number {
+  return (
+    TIME_SIGNATURE_OPTIONS.find((option) => option.value === timeSignature)
+      ?.beatsPerMeasure ?? 4
+  )
+}
+
+export function getMeasureSubdivisions(timeSignature: TimeSignature): number {
+  return getBeatsPerMeasure(timeSignature) * SUBDIVISIONS_PER_BEAT
+}
+
+export function canUseDot(_: BaseDuration): boolean {
+  return true
 }
 
 export function getDurationSubdivisions(
-  baseDuration: BaseDuration,
+  baseDuration: RenderDuration,
   dotted: boolean,
 ): number {
   const base = BASE_DURATION_SUBDIVISIONS[baseDuration]
 
-  if (!dotted) {
+  if (!dotted || baseDuration === '32') {
     return base
   }
 
-  if (baseDuration === 'h') {
-    return 12
-  }
-
-  if (baseDuration === 'q') {
-    return 6
-  }
-
-  if (baseDuration === '8') {
-    return 3
-  }
-
-  return base
+  return base + Math.floor(base / 2)
 }
 
 export function getItemSubdivisions(item: ScoreItem): number {
@@ -84,9 +88,17 @@ export function toTonePitch(pitch: NotePitch): string {
 
 export function cloneMeasures(measures: MeasureData[]): MeasureData[] {
   return measures.map((measure) => ({
-    bassItems: measure.bassItems.map((item) => ({ ...item })),
+    bassItems: measure.bassItems.map((item) =>
+      item.kind === 'note'
+        ? { ...item, pitches: [...item.pitches] }
+        : { ...item },
+    ),
     id: measure.id,
-    trebleItems: measure.trebleItems.map((item) => ({ ...item })),
+    trebleItems: measure.trebleItems.map((item) =>
+      item.kind === 'note'
+        ? { ...item, pitches: [...item.pitches] }
+        : { ...item },
+    ),
   }))
 }
 
@@ -129,11 +141,12 @@ export function findNextContiguousItem(
   measureIndex: number,
   staffId: StaffId,
   item: ScoreItem,
+  subdivisionsPerMeasure: number,
 ): ContiguousTarget | null {
   const nextStart = itemEnd(item)
   const items = getItemsForStaff(measures[measureIndex], staffId)
 
-  if (nextStart < SUBDIVISIONS_PER_MEASURE) {
+  if (nextStart < subdivisionsPerMeasure) {
     const nextItem = findStartingItem(items, nextStart)
     return nextItem ? { item: nextItem, measureIndex } : null
   }
@@ -148,7 +161,30 @@ export function findNextContiguousItem(
   return nextItem ? { item: nextItem, measureIndex: measureIndex + 1 } : null
 }
 
-export function normalizeMeasures(measures: MeasureData[]): MeasureData[] {
+export function sortPitches(
+  pitches: NotePitch[],
+  staffId: StaffId,
+): NotePitch[] {
+  const pool = getPitchPool(staffId)
+  return [...new Set(pitches)].sort(
+    (left, right) => pool.indexOf(left) - pool.indexOf(right),
+  )
+}
+
+export function haveSamePitches(
+  left: NotePitch[],
+  right: NotePitch[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((pitch, index) => pitch === right[index])
+  )
+}
+
+export function normalizeMeasures(
+  measures: MeasureData[],
+  subdivisionsPerMeasure: number,
+): MeasureData[] {
   const cloned = cloneMeasures(measures)
 
   cloned.forEach((measure, measureIndex) => {
@@ -157,15 +193,25 @@ export function normalizeMeasures(measures: MeasureData[]): MeasureData[] {
       items.sort((left, right) => left.start - right.start)
 
       items.forEach((item) => {
+        if (item.kind === 'note') {
+          item.pitches = sortPitches(item.pitches, staffId)
+        }
+
         if (!item.tieToNext) {
           return
         }
 
-        const next = findNextContiguousItem(cloned, measureIndex, staffId, item)
+        const next = findNextContiguousItem(
+          cloned,
+          measureIndex,
+          staffId,
+          item,
+          subdivisionsPerMeasure,
+        )
         const validTarget =
           item.kind === 'note' &&
           next?.item.kind === 'note' &&
-          item.pitch === next.item.pitch
+          haveSamePitches(item.pitches, next.item.pitches)
 
         if (!validTarget) {
           item.tieToNext = false
@@ -177,11 +223,15 @@ export function normalizeMeasures(measures: MeasureData[]): MeasureData[] {
   return cloned
 }
 
-export function buildPlaybackNotes(measures: MeasureData[]) {
-  const sixteenthSeconds = (60 / BPM) / 4
+export function buildPlaybackNotes(
+  measures: MeasureData[],
+  timeSignature: TimeSignature,
+) {
+  const subdivisionSeconds = (60 / BPM) / SUBDIVISIONS_PER_BEAT
+  const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
   const segments: Array<{
     durationSeconds: number
-    note: string
+    notes: string[]
     startSeconds: number
   }> = []
   const visited = new Set<string>()
@@ -205,9 +255,14 @@ export function buildPlaybackNotes(measures: MeasureData[]) {
             currentMeasureIndex,
             staffId,
             currentItem,
+            subdivisionsPerMeasure,
           )
 
-          if (!next || next.item.kind !== 'note' || next.item.pitch !== item.pitch) {
+          if (
+            !next ||
+            next.item.kind !== 'note' ||
+            !haveSamePitches(next.item.pitches, item.pitches)
+          ) {
             break
           }
 
@@ -218,10 +273,10 @@ export function buildPlaybackNotes(measures: MeasureData[]) {
         }
 
         segments.push({
-          durationSeconds: totalSubdivisions * sixteenthSeconds,
-          note: toTonePitch(item.pitch ?? 'c/4'),
+          durationSeconds: totalSubdivisions * subdivisionSeconds,
+          notes: item.pitches.map(toTonePitch),
           startSeconds:
-            (measureIndex * SUBDIVISIONS_PER_MEASURE + item.start) * sixteenthSeconds,
+            (measureIndex * subdivisionsPerMeasure + item.start) * subdivisionSeconds,
         })
       })
     })
@@ -231,7 +286,9 @@ export function buildPlaybackNotes(measures: MeasureData[]) {
 }
 
 function getPitchPool(staffId: StaffId) {
-  return staffId === 'treble' ? TREBLE_PITCHES_FROM_TOP : BASS_PITCHES_FROM_TOP
+  return (staffId === 'treble'
+    ? TREBLE_PITCHES_FROM_TOP
+    : BASS_PITCHES_FROM_TOP) as readonly string[]
 }
 
 export function yToPitch(
@@ -245,7 +302,7 @@ export function yToPitch(
   const rawIndex = Math.round((y - topLineY) / diatonicStep) + 2
   const clampedIndex = Math.min(Math.max(rawIndex, 0), pool.length - 1)
 
-  return pool[clampedIndex] ?? (staffId === 'treble' ? 'g/4' : 'd/3')
+  return pool[clampedIndex] ?? (staffId === 'treble' ? 'g/4' : 'c/3')
 }
 
 export function pitchToY(
@@ -265,33 +322,28 @@ export function getPitchLabel(pitch: NotePitch): string {
   return `${note.toUpperCase()}${octave}`
 }
 
+export function getPitchLabels(pitches: NotePitch[]): string {
+  return pitches.map(getPitchLabel).join(' + ')
+}
+
 export function getSnapStep(baseDuration: BaseDuration, dotted: boolean): number {
-  if (baseDuration === 'w') {
-    return SUBDIVISIONS_PER_MEASURE
+  const base = BASE_DURATION_SUBDIVISIONS[baseDuration]
+
+  if (!dotted) {
+    return base
   }
 
-  if (baseDuration === 'h') {
-    return dotted ? 4 : 8
-  }
-
-  if (baseDuration === 'q') {
-    return dotted ? 2 : 4
-  }
-
-  if (baseDuration === '8') {
-    return dotted ? 1 : 2
-  }
-
-  return 1
+  return Math.max(1, Math.floor(base / 2))
 }
 
 export function snapSubdivision(
   rawSubdivision: number,
   baseDuration: BaseDuration,
   dotted: boolean,
+  subdivisionsPerMeasure: number,
 ): number {
   const length = getDurationSubdivisions(baseDuration, dotted)
-  const maxStart = Math.max(0, SUBDIVISIONS_PER_MEASURE - length)
+  const maxStart = Math.max(0, subdivisionsPerMeasure - length)
   const step = getSnapStep(baseDuration, dotted)
   const snapped = Math.floor(rawSubdivision / step) * step
   return Math.min(snapped, maxStart)
@@ -314,10 +366,7 @@ export function buildSystems(measures: MeasureData[]) {
 
   measures.forEach((measure, measureIndex) => {
     const measureWidth = getSystemMeasureWidth(currentSystem.length)
-    if (
-      currentSystem.length > 0 &&
-      currentWidth + measureWidth > maxWidth
-    ) {
+    if (currentSystem.length > 0 && currentWidth + measureWidth > maxWidth) {
       systems.push(currentSystem)
       currentSystem = []
       currentWidth = 0
@@ -333,4 +382,28 @@ export function buildSystems(measures: MeasureData[]) {
   }
 
   return systems
+}
+
+export function getChordStemDirection(
+  pitches: NotePitch[],
+  staffId: StaffId,
+): number {
+  const pool = getPitchPool(staffId)
+  const middleIndex = 6
+  const indexes = pitches
+    .map((pitch) => pool.indexOf(pitch))
+    .filter((index) => index >= 0)
+
+  if (indexes.length === 0) {
+    return Stem.UP
+  }
+
+  const highestDistance = Math.abs(Math.min(...indexes) - middleIndex)
+  const lowestDistance = Math.abs(Math.max(...indexes) - middleIndex)
+
+  return lowestDistance >= highestDistance ? Stem.UP : Stem.DOWN
+}
+
+export function isChord(item: ScoreItem): item is NoteItem {
+  return item.kind === 'note' && item.pitches.length > 1
 }

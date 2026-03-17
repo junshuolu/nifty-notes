@@ -1,17 +1,28 @@
 export type BaseDuration = 'w' | 'h' | 'q' | '8' | '16'
+export type RenderDuration = BaseDuration | '32'
 export type EditMode = 'note' | 'rest' | 'tie' | 'erase'
 export type NotePitch = string
 export type StaffId = 'treble' | 'bass'
+export type TimeSignature = '4/4' | '3/4' | '2/4'
 
-export interface ScoreItem {
+interface ScoreItemBase {
   id: string
-  kind: 'note' | 'rest'
   baseDuration: BaseDuration
   dots: 0 | 1
   start: number
-  pitch?: NotePitch
   tieToNext?: boolean
 }
+
+export interface NoteItem extends ScoreItemBase {
+  kind: 'note'
+  pitches: NotePitch[]
+}
+
+export interface RestItem extends ScoreItemBase {
+  kind: 'rest'
+}
+
+export type ScoreItem = NoteItem | RestItem
 
 export interface MeasureData {
   bassItems: ScoreItem[]
@@ -37,16 +48,20 @@ export interface ContiguousTarget {
 }
 
 export interface HoverPreview {
-  pitch: NotePitch
+  pitches: NotePitch[]
   x: number
   y: number
 }
 
+export interface TimeSignatureOption {
+  beatsPerMeasure: number
+  label: TimeSignature
+  value: TimeSignature
+}
+
 export const STAFF_IDS: StaffId[] = ['treble', 'bass']
 export const BPM = 80
-export const BEATS_PER_MEASURE = 4
-export const SUBDIVISIONS_PER_BEAT = 4
-export const SUBDIVISIONS_PER_MEASURE = BEATS_PER_MEASURE * SUBDIVISIONS_PER_BEAT
+export const SUBDIVISIONS_PER_BEAT = 8
 export const SYSTEM_LEFT = 52
 export const SYSTEM_TOP = 116
 export const SYSTEM_GAP_Y = 232
@@ -62,7 +77,6 @@ export const PLACEHOLDER_COLOR = '#c0cadc'
 export const ERASE_HOVER_COLOR = '#ef4444'
 
 export const TREBLE_PITCHES_FROM_TOP = [
-  'a/5',
   'g/5',
   'f/5',
   'e/5',
@@ -98,17 +112,15 @@ export const BASS_PITCHES_FROM_TOP = [
   'e/2',
   'd/2',
   'c/2',
-  'b/1',
-  'a/1',
-  'g/1',
 ] as const
 
-export const BASE_DURATION_SUBDIVISIONS: Record<BaseDuration, number> = {
-  '16': 1,
-  '8': 2,
-  h: 8,
-  q: 4,
-  w: 16,
+export const BASE_DURATION_SUBDIVISIONS: Record<RenderDuration, number> = {
+  '32': 1,
+  '16': 2,
+  '8': 4,
+  h: 16,
+  q: 8,
+  w: 32,
 }
 
 export const DURATION_OPTIONS: Array<{
@@ -121,6 +133,14 @@ export const DURATION_OPTIONS: Array<{
   { baseDuration: 'q', label: 'Quarter', previewClass: 'quarter' },
   { baseDuration: '8', label: 'Eighth', previewClass: 'eighth' },
   { baseDuration: '16', label: 'Sixteenth', previewClass: 'sixteenth' },
+]
+
+export const PLACEHOLDER_DURATIONS: RenderDuration[] = ['w', 'h', 'q', '8', '16', '32']
+
+export const TIME_SIGNATURE_OPTIONS: TimeSignatureOption[] = [
+  { beatsPerMeasure: 4, label: '4/4', value: '4/4' },
+  { beatsPerMeasure: 3, label: '3/4', value: '3/4' },
+  { beatsPerMeasure: 2, label: '2/4', value: '2/4' },
 ]
 
 export const PIANO_SAMPLE_URLS = {

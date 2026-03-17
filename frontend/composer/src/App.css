@@ -255,6 +255,12 @@
   font-size: 1rem;
 }
 
+.status-copy {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
 .panel ul {
   margin: 0;
   padding-left: 18px;
@@ -294,6 +300,11 @@
   box-shadow: 0 28px 54px rgba(15, 23, 42, 0.08);
 }
 
+.score-paper--empty {
+  padding-top: 14px;
+  padding-bottom: 12px;
+}
+
 .score-heading {
   display: flex;
   align-items: flex-start;
@@ -331,6 +342,11 @@
   overflow-x: auto;
   overflow-y: hidden;
   padding: 10px 0 8px;
+}
+
+.score-paper--empty .score-viewport {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .score-surface {
