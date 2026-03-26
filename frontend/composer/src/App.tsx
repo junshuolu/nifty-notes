@@ -20,10 +20,12 @@ import './App.css'
 import { CursorPreview } from './composer/CursorPreview'
 import {
   ACTIVE_COLOR,
-  BPM,
+  DEFAULT_BPM,
   DURATION_OPTIONS,
   ERASE_HOVER_COLOR,
   GRAND_STAFF_GAP,
+  MAX_BPM,
+  MIN_BPM,
   NOTE_COLOR,
   PIANO_SAMPLE_URLS,
   PLACEHOLDER_DURATIONS,
@@ -46,6 +48,7 @@ import {
   type StaffId,
   type TimeSignature,
   createMeasure,
+  generateId,
   initialMeasures,
 } from './composer/constants'
 import {
@@ -66,6 +69,7 @@ import {
   getMeasureSubdivisions,
   getPitchLabel,
   getPitchLabels,
+  getSubdivisionSeconds,
   haveSamePitches,
   itemEnd,
   normalizeMeasures,
@@ -76,6 +80,76 @@ import {
   toTonePitch,
   yToPitch,
 } from './composer/score'
+
+const PLAYBACK_START_DELAY_SECONDS = 0.08
+const REST_VISUAL_SHIFT = 7
+
+type PlayheadState = {
+  height: number
+  top: number
+  x: number
+}
+
+function clampTempo(nextTempo: number) {
+  return Math.min(MAX_BPM, Math.max(MIN_BPM, Math.round(nextTempo)))
+}
+
+function getPlayheadState(
+  hitBoxes: MeasureHitBox[],
+  elapsedSeconds: number,
+  bpm: number,
+  subdivisionsPerMeasure: number,
+): PlayheadState | null {
+  if (hitBoxes.length === 0) {
+    return null
+  }
+
+  const trebleBoxes = hitBoxes
+    .filter((box) => box.staffId === 'treble')
+    .sort((left, right) => left.index - right.index)
+  const bassBoxes = hitBoxes
+    .filter((box) => box.staffId === 'bass')
+    .sort((left, right) => left.index - right.index)
+
+  if (trebleBoxes.length === 0 || bassBoxes.length === 0) {
+    return null
+  }
+
+  const subdivisionSeconds = getSubdivisionSeconds(bpm)
+  const absoluteSubdivision = Math.max(0, elapsedSeconds / subdivisionSeconds)
+  const measureIndex = Math.min(
+    Math.floor(absoluteSubdivision / subdivisionsPerMeasure),
+    trebleBoxes.length - 1,
+  )
+  const localSubdivision = Math.min(
+    absoluteSubdivision - measureIndex * subdivisionsPerMeasure,
+    subdivisionsPerMeasure - 1,
+  )
+  const leftSubdivision = Math.max(0, Math.floor(localSubdivision))
+  const rightSubdivision = Math.min(
+    leftSubdivision + 1,
+    subdivisionsPerMeasure - 1,
+  )
+  const interpolation = localSubdivision - leftSubdivision
+  const trebleBox = trebleBoxes[measureIndex]
+  const bassBox = bassBoxes[measureIndex]
+
+  if (!trebleBox || !bassBox) {
+    return null
+  }
+
+  const startX =
+    trebleBox.xBySubdivision[leftSubdivision] ??
+    trebleBox.xBySubdivision[0] ??
+    trebleBox.left
+  const endX = trebleBox.xBySubdivision[rightSubdivision] ?? startX
+
+  return {
+    height: bassBox.hitBottom - trebleBox.hitTop,
+    top: trebleBox.hitTop,
+    x: startX + (endX - startX) * interpolation,
+  }
+}
 
 function styleNote(note: StaveNote, color: string) {
   note.setStyle({ fillStyle: color, strokeStyle: color })
@@ -316,7 +390,8 @@ function positionTickablesOnGrid(
       return
     }
 
-    const anchorX = (startX + endX) / 2
+    const anchorX =
+      (startX + endX) / 2 - (note.isRest() ? REST_VISUAL_SHIFT : 0)
     const relativeX = anchorX - stave.getNoteStartX() - stavePadding
     note.getTickContext().setX(relativeX)
   })
@@ -324,20 +399,31 @@ function positionTickablesOnGrid(
 
 function App() {
   const scoreRef = useRef<HTMLDivElement | null>(null)
+  const tempoPanelRef = useRef<HTMLDivElement | null>(null)
   const hitBoxesRef = useRef<MeasureHitBox[]>([])
   const pianoRef = useRef<Tone.Sampler | null>(null)
   const pianoLoaderRef = useRef<Promise<Tone.Sampler> | null>(null)
+  const previewSynthRef = useRef<Tone.Synth | null>(null)
+  const metronomeSynthRef = useRef<Tone.Synth | null>(null)
   const playbackTimerRef = useRef<number | null>(null)
+  const playheadAnimationRef = useRef<number | null>(null)
+  const playbackStartRef = useRef<number | null>(null)
+  const playbackDurationRef = useRef(0)
+  const scheduledTransportEventsRef = useRef<number[]>([])
   const [measures, setMeasures] = useState<MeasureData[]>(initialMeasures)
   const [timeSignature, setTimeSignature] = useState<TimeSignature>('4/4')
   const [mode, setMode] = useState<EditMode>('note')
   const [baseDuration, setBaseDuration] = useState<BaseDuration>('q')
   const [dotted, setDotted] = useState(false)
+  const [tempoBpm, setTempoBpm] = useState(DEFAULT_BPM)
+  const [isMetronomeEnabled, setIsMetronomeEnabled] = useState(false)
+  const [isTempoPanelOpen, setIsTempoPanelOpen] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
   const [eraseHoverItemId, setEraseHoverItemId] = useState<string | null>(null)
   const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null)
+  const [playhead, setPlayhead] = useState<PlayheadState | null>(null)
   const [status, setStatus] = useState(
-    'Choose a duration, then click either staff to add notes, rests, or chords.',
+    'Choose a note value, then click either staff to add notes, rests, or chords.',
   )
   const [isPlaying, setIsPlaying] = useState(false)
 
@@ -361,9 +447,95 @@ function App() {
         window.clearTimeout(playbackTimerRef.current)
       }
 
+      if (playheadAnimationRef.current !== null) {
+        window.cancelAnimationFrame(playheadAnimationRef.current)
+      }
+
+      Tone.Transport.stop()
+      Tone.Transport.cancel(0)
       pianoRef.current?.dispose()
+      previewSynthRef.current?.dispose()
+      metronomeSynthRef.current?.dispose()
     }
   }, [])
+
+  useEffect(() => {
+    if (!isTempoPanelOpen) {
+      return
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (
+        tempoPanelRef.current &&
+        !tempoPanelRef.current.contains(event.target as Node)
+      ) {
+        setIsTempoPanelOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [isTempoPanelOpen])
+
+  function clearScheduledPlayback() {
+    scheduledTransportEventsRef.current.forEach((eventId) => {
+      Tone.Transport.clear(eventId)
+    })
+    scheduledTransportEventsRef.current = []
+    Tone.Transport.stop()
+    Tone.Transport.cancel(0)
+  }
+
+  function stopPlaybackVisuals() {
+    if (playbackTimerRef.current !== null) {
+      window.clearTimeout(playbackTimerRef.current)
+      playbackTimerRef.current = null
+    }
+
+    if (playheadAnimationRef.current !== null) {
+      window.cancelAnimationFrame(playheadAnimationRef.current)
+      playheadAnimationRef.current = null
+    }
+
+    playbackStartRef.current = null
+    playbackDurationRef.current = 0
+    setPlayhead(null)
+  }
+
+  function startPlayheadAnimation(totalDuration: number) {
+    stopPlaybackVisuals()
+    playbackDurationRef.current = totalDuration
+    playbackStartRef.current =
+      performance.now() + PLAYBACK_START_DELAY_SECONDS * 1000
+
+    const updatePlayhead = () => {
+      const startedAt = playbackStartRef.current
+      if (startedAt === null) {
+        return
+      }
+
+      const elapsedSeconds = Math.max(0, (performance.now() - startedAt) / 1000)
+      const nextPlayhead = getPlayheadState(
+        hitBoxesRef.current,
+        Math.min(elapsedSeconds, playbackDurationRef.current),
+        tempoBpm,
+        subdivisionsPerMeasure,
+      )
+
+      setPlayhead(nextPlayhead)
+
+      if (elapsedSeconds < playbackDurationRef.current) {
+        playheadAnimationRef.current = window.requestAnimationFrame(updatePlayhead)
+      } else {
+        playheadAnimationRef.current = null
+      }
+    }
+
+    playheadAnimationRef.current = window.requestAnimationFrame(updatePlayhead)
+  }
 
   useEffect(() => {
     const host = scoreRef.current
@@ -629,6 +801,38 @@ function App() {
     return pianoLoaderRef.current
   }
 
+  function ensurePreviewSynth() {
+    if (!previewSynthRef.current) {
+      previewSynthRef.current = new Tone.Synth({
+        envelope: {
+          attack: 0.002,
+          decay: 0.08,
+          release: 0.1,
+          sustain: 0,
+        },
+        oscillator: { type: 'triangle' },
+      }).toDestination()
+    }
+
+    return previewSynthRef.current
+  }
+
+  function ensureMetronomeSynth() {
+    if (!metronomeSynthRef.current) {
+      metronomeSynthRef.current = new Tone.Synth({
+        envelope: {
+          attack: 0.001,
+          decay: 0.04,
+          release: 0.05,
+          sustain: 0,
+        },
+        oscillator: { type: 'square' },
+      }).toDestination()
+    }
+
+    return metronomeSynthRef.current
+  }
+
   function clearHoverState() {
     setHoverPreview(null)
     setEraseHoverItemId(null)
@@ -672,10 +876,21 @@ function App() {
 
   async function playPreviewPitch(pitch: NotePitch) {
     try {
-      const piano = await ensurePiano()
-      piano.triggerAttackRelease(toTonePitch(pitch), 0.45, Tone.now())
+      if (Tone.context.state !== 'running') {
+        await Tone.start()
+      }
+
+      if (pianoRef.current?.loaded) {
+        pianoRef.current.triggerAttackRelease(toTonePitch(pitch), 0.45, Tone.now())
+        return
+      }
+
+      ensurePreviewSynth().triggerAttackRelease(toTonePitch(pitch), '8n', Tone.now())
+      void ensurePiano().catch(() => {
+        setStatus('Piano samples could not be loaded.')
+      })
     } catch {
-      setStatus('Piano samples could not be loaded.')
+      setStatus('Audio preview could not be started.')
     }
   }
 
@@ -753,7 +968,7 @@ function App() {
           ? {
               baseDuration,
               dots: dotted ? 1 : 0,
-              id: crypto.randomUUID(),
+              id: generateId(),
               kind,
               pitches: [pitch],
               start,
@@ -761,7 +976,7 @@ function App() {
           : {
               baseDuration,
               dots: dotted ? 1 : 0,
-              id: crypto.randomUUID(),
+              id: generateId(),
               kind,
               start,
             }
@@ -1002,18 +1217,15 @@ function App() {
   async function handlePlay() {
     if (isPlaying) {
       pianoRef.current?.releaseAll()
-
-      if (playbackTimerRef.current !== null) {
-        window.clearTimeout(playbackTimerRef.current)
-        playbackTimerRef.current = null
-      }
+      clearScheduledPlayback()
+      stopPlaybackVisuals()
 
       setIsPlaying(false)
       setStatus('Playback stopped.')
       return
     }
 
-    const notes = buildPlaybackNotes(measures, timeSignature)
+    const notes = buildPlaybackNotes(measures, timeSignature, tempoBpm)
     if (notes.length === 0) {
       setStatus('There are no notes to play yet.')
       return
@@ -1030,14 +1242,20 @@ function App() {
       return
     }
 
-    const startTime = Tone.now() + 0.08
+    clearScheduledPlayback()
+    Tone.Transport.bpm.value = tempoBpm
+    Tone.Transport.position = 0
     let totalDuration = 0
 
     notes.forEach((segment) => {
-      piano.triggerAttackRelease(
-        segment.notes,
-        segment.durationSeconds * 0.96,
-        startTime + segment.startSeconds,
+      scheduledTransportEventsRef.current.push(
+        Tone.Transport.schedule((time) => {
+          piano.triggerAttackRelease(
+            segment.notes,
+            segment.durationSeconds * 0.96,
+            time,
+          )
+        }, segment.startSeconds),
       )
 
       totalDuration = Math.max(
@@ -1046,17 +1264,49 @@ function App() {
       )
     })
 
-    if (playbackTimerRef.current !== null) {
-      window.clearTimeout(playbackTimerRef.current)
+    if (isMetronomeEnabled) {
+      const metronome = ensureMetronomeSynth()
+      const beatSeconds = 60 / tempoBpm
+      const beatCount = Math.ceil(totalDuration / beatSeconds)
+
+      for (let beatIndex = 0; beatIndex <= beatCount; beatIndex += 1) {
+        const isDownBeat = beatIndex % beatsPerMeasure === 0
+        scheduledTransportEventsRef.current.push(
+          Tone.Transport.schedule((time) => {
+            metronome.triggerAttackRelease(
+              isDownBeat ? 'C6' : 'A5',
+              '32n',
+              time,
+              isDownBeat ? 0.9 : 0.55,
+            )
+          }, beatIndex * beatSeconds),
+        )
+      }
     }
+
+    startPlayheadAnimation(totalDuration)
+    Tone.Transport.start(`+${PLAYBACK_START_DELAY_SECONDS}`)
 
     playbackTimerRef.current = window.setTimeout(() => {
       setIsPlaying(false)
-      playbackTimerRef.current = null
+      clearScheduledPlayback()
+      stopPlaybackVisuals()
     }, (totalDuration + 0.3) * 1000)
 
     setIsPlaying(true)
-    setStatus('Playing Nifty Notes with piano samples.')
+    setStatus(
+      isMetronomeEnabled
+        ? `Playing at ${tempoBpm} BPM with metronome.`
+        : `Playing at ${tempoBpm} BPM.`,
+    )
+  }
+
+  function updateTempo(nextTempo: number) {
+    if (Number.isNaN(nextTempo)) {
+      return
+    }
+
+    setTempoBpm(clampTempo(nextTempo))
   }
 
   function selectDuration(nextDuration: BaseDuration) {
@@ -1072,10 +1322,18 @@ function App() {
     setMeasures((current) => current.map((measure) => createMeasure(measure.id)))
     setActiveItemId(null)
     clearHoverState()
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
     setStatus(`Switched to ${nextTimeSignature}. Existing notes were cleared.`)
   }
 
   function addMeasure() {
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
     setMeasures((current) => [
       ...current,
       createMeasure(`measure-${current.length + 1}`),
@@ -1084,6 +1342,10 @@ function App() {
   }
 
   function removeMeasure() {
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
     setMeasures((current) => {
       if (current.length === 1) {
         setStatus('At least one bar must remain.')
@@ -1113,14 +1375,56 @@ function App() {
           <button className="primary-pill" onClick={handlePlay} type="button">
             {isPlaying ? 'Stop' : 'Play'}
           </button>
-          <div className="tempo-chip">Tempo {BPM} BPM</div>
+          <div className="tempo-control" ref={tempoPanelRef}>
+            <button
+              aria-expanded={isTempoPanelOpen}
+              className={`tempo-chip${isTempoPanelOpen ? ' active' : ''}`}
+              onClick={() => setIsTempoPanelOpen((current) => !current)}
+              type="button"
+            >
+              Tempo {tempoBpm} BPM
+            </button>
+            {isTempoPanelOpen ? (
+              <div className="tempo-panel">
+                <label className="tempo-panel__field">
+                  <span>Tempo</span>
+                  <input
+                    max={MAX_BPM}
+                    min={MIN_BPM}
+                    onChange={(event) => updateTempo(Number(event.target.value))}
+                    type="range"
+                    value={tempoBpm}
+                  />
+                </label>
+                <label className="tempo-panel__field tempo-panel__field--number">
+                  <span>BPM</span>
+                  <input
+                    max={MAX_BPM}
+                    min={MIN_BPM}
+                    onChange={(event) => updateTempo(Number(event.target.value))}
+                    type="number"
+                    value={tempoBpm}
+                  />
+                </label>
+                <button
+                  className={isMetronomeEnabled ? 'tool active' : 'tool'}
+                  onClick={() =>
+                    setIsMetronomeEnabled((current) => !current)
+                  }
+                  type="button"
+                >
+                  {isMetronomeEnabled ? 'Metronome On' : 'Metronome Off'}
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
       <div className="toolbar-wrap">
         <div className="toolbar">
           <div className="tool-group tool-group--duration">
-            <span className="group-label">Duration</span>
+            <span className="group-label">Note Value</span>
             {DURATION_OPTIONS.map((option) => (
               <button
                 key={option.baseDuration}
@@ -1186,7 +1490,7 @@ function App() {
           </div>
 
           <div className="tool-group">
-            <span className="group-label">Meter</span>
+            <span className="group-label">Time Signature</span>
             {TIME_SIGNATURE_OPTIONS.map((option) => (
               <button
                 key={option.value}
@@ -1225,12 +1529,20 @@ function App() {
               </strong>
             </div>
             <div className="summary-row">
-              <span>Duration</span>
+              <span>Note Value</span>
               <strong>{selectedDurationName}</strong>
             </div>
             <div className="summary-row">
-              <span>Meter</span>
+              <span>Time Signature</span>
               <strong>{timeSignature}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Tempo</span>
+              <strong>{tempoBpm} BPM</strong>
+            </div>
+            <div className="summary-row">
+              <span>Metronome</span>
+              <strong>{isMetronomeEnabled ? 'On' : 'Off'}</strong>
             </div>
             <div className="summary-row">
               <span>Systems</span>
@@ -1250,17 +1562,17 @@ function App() {
           <section className="panel">
             <h2>What Changed</h2>
             <ul>
-              <li>Nifty Notes now covers the 26-note range from C2 to G5.</li>
-              <li>4/4, 3/4, and 2/4 can be switched directly in the toolbar.</li>
-              <li>Click the same beat again to grow or trim a chord.</li>
-              <li>Playback now handles tied notes and full chords.</li>
+              <li>Rests now sit slightly further left, so the bar reads more naturally.</li>
+              <li>Pitch picking now lines up with the note you actually click.</li>
+              <li>Tempo can be adjusted from the top bar, with an optional metronome.</li>
+              <li>Playback now shows a vertical playhead across both staves.</li>
             </ul>
           </section>
 
           <section className="panel">
             <h2>Interaction Notes</h2>
             <ul>
-              <li>Choose a duration, then toggle Dot if you want the dotted version.</li>
+              <li>Choose a note value, then toggle Dot if you want the dotted version.</li>
               <li>Treble and bass keep separate editable data on the grand staff.</li>
               <li>Erase removes an entire note, chord, or rest at the hovered position.</li>
             </ul>
@@ -1275,6 +1587,17 @@ function App() {
                 style={{ height: `${scoreHeight}px`, width: `${scoreWidth}px` }}
               >
                 <div className="score-canvas" ref={scoreRef} />
+                {playhead ? (
+                  <div
+                    aria-hidden="true"
+                    className="playhead-line"
+                    style={{
+                      height: `${playhead.height}px`,
+                      left: `${playhead.x}px`,
+                      top: `${playhead.top}px`,
+                    }}
+                  />
+                ) : null}
                 {mode === 'note' && hoverPreview ? (
                   <CursorPreview
                     baseDuration={baseDuration}

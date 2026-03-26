@@ -1,8 +1,8 @@
 import { Stem } from 'vexflow'
 import {
+  BASS_TOP_LINE_INDEX,
   BASS_PITCHES_FROM_TOP,
   BASE_DURATION_SUBDIVISIONS,
-  BPM,
   DURATION_OPTIONS,
   STAFF_IDS,
   SUBDIVISIONS_PER_BEAT,
@@ -11,6 +11,7 @@ import {
   SYSTEM_SIDE_PADDING,
   SYSTEM_WRAP_WIDTH,
   TIME_SIGNATURE_OPTIONS,
+  TREBLE_TOP_LINE_INDEX,
   TREBLE_PITCHES_FROM_TOP,
   type BaseDuration,
   type ContiguousTarget,
@@ -226,8 +227,9 @@ export function normalizeMeasures(
 export function buildPlaybackNotes(
   measures: MeasureData[],
   timeSignature: TimeSignature,
+  bpm: number,
 ) {
-  const subdivisionSeconds = (60 / BPM) / SUBDIVISIONS_PER_BEAT
+  const subdivisionSeconds = getSubdivisionSeconds(bpm)
   const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
   const segments: Array<{
     durationSeconds: number
@@ -291,6 +293,14 @@ function getPitchPool(staffId: StaffId) {
     : BASS_PITCHES_FROM_TOP) as readonly string[]
 }
 
+function getTopLineIndex(staffId: StaffId) {
+  return staffId === 'treble' ? TREBLE_TOP_LINE_INDEX : BASS_TOP_LINE_INDEX
+}
+
+export function getSubdivisionSeconds(bpm: number) {
+  return (60 / bpm) / SUBDIVISIONS_PER_BEAT
+}
+
 export function yToPitch(
   y: number,
   topLineY: number,
@@ -299,7 +309,8 @@ export function yToPitch(
 ): NotePitch {
   const pool = getPitchPool(staffId)
   const diatonicStep = spacing / 2
-  const rawIndex = Math.round((y - topLineY) / diatonicStep) + 2
+  const rawIndex =
+    Math.round((y - topLineY) / diatonicStep) + getTopLineIndex(staffId)
   const clampedIndex = Math.min(Math.max(rawIndex, 0), pool.length - 1)
 
   return pool[clampedIndex] ?? (staffId === 'treble' ? 'g/4' : 'c/3')
@@ -314,7 +325,7 @@ export function pitchToY(
   const pool = getPitchPool(staffId)
   const pitchIndex = pool.findIndex((value) => value === pitch)
   const safeIndex = pitchIndex >= 0 ? pitchIndex : 8
-  return topLineY + (safeIndex - 2) * (spacing / 2)
+  return topLineY + (safeIndex - getTopLineIndex(staffId)) * (spacing / 2)
 }
 
 export function getPitchLabel(pitch: NotePitch): string {

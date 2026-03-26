@@ -60,7 +60,9 @@ export interface TimeSignatureOption {
 }
 
 export const STAFF_IDS: StaffId[] = ['treble', 'bass']
-export const BPM = 80
+export const DEFAULT_BPM = 80
+export const MIN_BPM = 40
+export const MAX_BPM = 180
 export const SUBDIVISIONS_PER_BEAT = 8
 export const SYSTEM_LEFT = 52
 export const SYSTEM_TOP = 116
@@ -95,6 +97,7 @@ export const TREBLE_PITCHES_FROM_TOP = [
   'f/3',
   'e/3',
 ] as const
+export const TREBLE_TOP_LINE_INDEX = 1
 
 export const BASS_PITCHES_FROM_TOP = [
   'c/4',
@@ -113,6 +116,7 @@ export const BASS_PITCHES_FROM_TOP = [
   'd/2',
   'c/2',
 ] as const
+export const BASS_TOP_LINE_INDEX = 2
 
 export const BASE_DURATION_SUBDIVISIONS: Record<RenderDuration, number> = {
   '32': 1,
@@ -176,10 +180,27 @@ export const PIANO_SAMPLE_URLS = {
   'F#7': 'Fs7.mp3',
 }
 
+let fallbackIdCounter = 0
+
+export function generateId() {
+  if (
+    typeof globalThis !== 'undefined' &&
+    globalThis.crypto &&
+    typeof globalThis.crypto.randomUUID === 'function'
+  ) {
+    return globalThis.crypto.randomUUID()
+  }
+
+  fallbackIdCounter += 1
+  return `nn-${Date.now()}-${fallbackIdCounter}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`
+}
+
 export function createMeasure(id?: string): MeasureData {
   return {
     bassItems: [],
-    id: id ?? crypto.randomUUID(),
+    id: id ?? generateId(),
     trebleItems: [],
   }
 }
