@@ -4,6 +4,7 @@ export type EditMode = 'note' | 'rest' | 'tie' | 'erase'
 export type NotePitch = string
 export type StaffId = 'treble' | 'bass'
 export type TimeSignature = '4/4' | '3/4' | '2/4'
+export type AccidentalType = '#' | 'b' | 'n'
 
 interface ScoreItemBase {
   id: string
@@ -16,6 +17,7 @@ interface ScoreItemBase {
 export interface NoteItem extends ScoreItemBase {
   kind: 'note'
   pitches: NotePitch[]
+  accidentals?: Record<string, AccidentalType>
 }
 
 export interface RestItem extends ScoreItemBase {

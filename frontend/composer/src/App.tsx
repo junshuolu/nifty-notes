@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import * as Tone from 'tone'
 import {
+  Accidental as VFAccidental,
   BarlineType,
   Beam,
   Dot,
@@ -20,7 +21,6 @@ import './App.css'
 import { CursorPreview } from './composer/CursorPreview'
 import {
   ACTIVE_COLOR,
-  DEFAULT_BPM,
   DURATION_OPTIONS,
   ERASE_HOVER_COLOR,
   GRAND_STAFF_GAP,
@@ -35,6 +35,7 @@ import {
   SYSTEM_SIDE_PADDING,
   SYSTEM_WRAP_WIDTH,
   TIME_SIGNATURE_OPTIONS,
+  type AccidentalType,
   type BaseDuration,
   type EditMode,
   type HoverPreview,
@@ -48,7 +49,6 @@ import {
   type TimeSignature,
   createMeasure,
   generateId,
-  initialMeasures,
 } from './composer/constants'
 import {
   buildPlaybackNotes,
@@ -79,6 +79,7 @@ import {
   toTonePitch,
   yToPitch,
 } from './composer/score'
+import { createFurEliseMeasures } from './composer/furElise'
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
 const NOTE_VISUAL_SHIFT = 4
@@ -96,6 +97,12 @@ type PlaceholderFocus = {
   beatStart: number
   measureIndex: number
   staffId: StaffId
+}
+
+type HoveredRestPosition = {
+  measureIndex: number
+  staffId: StaffId
+  subdivision: number
 }
 
 function clampTempo(nextTempo: number) {
@@ -176,6 +183,7 @@ function createVisualNote(
   activeItemId: string | null,
   eraseHoverItemId: string | null,
   noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>,
+  highlighted = false,
 ): StaveNote {
   const note =
     item.kind === 'note'
@@ -197,13 +205,23 @@ function createVisualNote(
   const color =
     eraseHoverItemId === item.id
       ? ERASE_HOVER_COLOR
-      : activeItemId === item.id
+      : highlighted && item.kind === 'rest'
         ? ACTIVE_COLOR
-        : NOTE_COLOR
+        : activeItemId === item.id
+          ? ACTIVE_COLOR
+          : NOTE_COLOR
 
   applyDots(note, item.dots, color)
-
   styleNote(note, color)
+
+  if (item.kind === 'note' && item.accidentals) {
+    item.pitches.forEach((pitch, index) => {
+      const acc = item.accidentals?.[pitch]
+      if (acc) {
+        note.addModifier(new VFAccidental(acc), index)
+      }
+    })
+  }
 
   if (item.kind === 'note') {
     noteRegistry.set(item.id, { item, note })
@@ -227,6 +245,7 @@ function createPlaceholder(
   baseDuration: RenderDuration,
   staffId: StaffId,
   color: string,
+  highlighted = false,
 ): StaveNote {
   const placeholder = new StaveNote({
     clef: staffId,
@@ -235,7 +254,8 @@ function createPlaceholder(
     type: 'r',
   })
 
-  styleNote(placeholder, color)
+  const effectiveColor = highlighted ? ACTIVE_COLOR : color
+  styleNote(placeholder, effectiveColor)
   return placeholder
 }
 
@@ -313,20 +333,7 @@ function clampPlaceholderLength(maxLength: number, preferredLength: number) {
   return 1
 }
 
-function beatContainsSixteenthContent(
-  items: ScoreItem[],
-  beatStart: number,
-) {
-  const beatEnd = beatStart + SUBDIVISIONS_PER_BEAT
 
-  return items.some((item) => {
-    if (item.start >= beatEnd || itemEnd(item) <= beatStart) {
-      return false
-    }
-
-    return getItemSubdivisions(item) <= 2
-  })
-}
 
 function getFocusedPlaceholderLength(
   items: ScoreItem[],
@@ -346,12 +353,7 @@ function getFocusedPlaceholderLength(
   }
 
   if (focusedBaseDuration === '16') {
-    const preferredLength =
-      subdivision < beatStart + 4 || beatContainsSixteenthContent(items, beatStart)
-        ? 2
-        : 4
-
-    return clampPlaceholderLength(maxLength, preferredLength)
+    return clampPlaceholderLength(maxLength, 2)
   }
 
   return getPlaceholderLength(items, subdivision, subdivisionsPerMeasure)
@@ -383,6 +385,7 @@ function buildStaffVoiceData(
   measureIndex: number,
   placeholderFocus: PlaceholderFocus | null,
   focusedBaseDuration: BaseDuration,
+  cursorSubdivision: number | null,
 ) {
   const notes: StaveNote[] = []
   const lengths: number[] = []
@@ -398,6 +401,7 @@ function buildStaffVoiceData(
     const item = findStartingItem(items, subdivision)
 
     if (item) {
+      const isItemHighlighted = cursorSubdivision !== null && item.start === cursorSubdivision
       lengths.push(getItemSubdivisions(item))
       starts.push(item.start)
       notes.push(
@@ -407,6 +411,7 @@ function buildStaffVoiceData(
           activeItemId,
           eraseHoverItemId,
           noteRegistry,
+          isItemHighlighted,
         ),
       )
       subdivision += getItemSubdivisions(item)
@@ -426,9 +431,10 @@ function buildStaffVoiceData(
         )
       : getPlaceholderLength(items, subdivision, subdivisionsPerMeasure)
     const placeholderDuration = getPlaceholderDurationForLength(placeholderLength)
+    const isHighlighted = cursorSubdivision !== null && subdivision === cursorSubdivision
     lengths.push(placeholderLength)
     starts.push(subdivision)
-    notes.push(createPlaceholder(placeholderDuration, staffId, NOTE_COLOR))
+    notes.push(createPlaceholder(placeholderDuration, staffId, NOTE_COLOR, isHighlighted))
     subdivision += placeholderLength
   }
 
@@ -627,6 +633,50 @@ function positionTickablesOnGrid(
   })
 }
 
+function HoverRestIndicator({
+  hitBoxes,
+  position,
+}: {
+  hitBoxes: MeasureHitBox[]
+  position: HoveredRestPosition
+}) {
+  const hitBox = hitBoxes.find(
+    (box) =>
+      box.index === position.measureIndex &&
+      box.staffId === position.staffId,
+  )
+
+  if (!hitBox) {
+    return null
+  }
+
+  const anchorX = hitBox.xBySubdivision[position.subdivision]
+
+  if (anchorX === undefined) {
+    return null
+  }
+
+  const indicatorY =
+    position.staffId === 'treble'
+      ? hitBox.topLineY + hitBox.spacing * 5.5
+      : hitBox.topLineY + hitBox.spacing * 5.5
+
+  return (
+    <div
+      className="hover-rest-indicator"
+      style={{ left: `${anchorX}px`, top: `${indicatorY}px` }}
+    >
+      <svg width="16" height="18" viewBox="0 0 16 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path
+          d="M8 0C8 0 0 8 0 12C0 15.3137 3.58172 18 8 18C12.4183 18 16 15.3137 16 12C16 8 8 0 8 0Z"
+          fill="#2563eb"
+          fillOpacity="0.85"
+        />
+      </svg>
+    </div>
+  )
+}
+
 function App() {
   const scoreRef = useRef<HTMLDivElement | null>(null)
   const tempoPanelRef = useRef<HTMLDivElement | null>(null)
@@ -640,12 +690,13 @@ function App() {
   const playbackStartRef = useRef<number | null>(null)
   const playbackDurationRef = useRef(0)
   const scheduledTransportEventsRef = useRef<number[]>([])
-  const [measures, setMeasures] = useState<MeasureData[]>(initialMeasures)
-  const [timeSignature, setTimeSignature] = useState<TimeSignature>('4/4')
+  const [measures, setMeasures] = useState<MeasureData[]>(() => createFurEliseMeasures())
+  const [timeSignature, setTimeSignature] = useState<TimeSignature>('3/4')
   const [mode, setMode] = useState<EditMode>('note')
-  const [baseDuration, setBaseDuration] = useState<BaseDuration>('q')
+  const [baseDuration, setBaseDuration] = useState<BaseDuration>('8')
   const [dotted, setDotted] = useState(false)
-  const [tempoBpm, setTempoBpm] = useState(DEFAULT_BPM)
+  const [accidental, setAccidental] = useState<AccidentalType | null>(null)
+  const [tempoBpm, setTempoBpm] = useState(72)
   const [isMetronomeEnabled, setIsMetronomeEnabled] = useState(false)
   const [isTempoPanelOpen, setIsTempoPanelOpen] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -654,20 +705,25 @@ function App() {
   const [placeholderFocus, setPlaceholderFocus] = useState<PlaceholderFocus | null>(
     null,
   )
+  const [hoveredRestPosition, setHoveredRestPosition] = useState<HoveredRestPosition | null>(null)
   const [playhead, setPlayhead] = useState<PlayheadState | null>(null)
   const [status, setStatus] = useState(
-    'Choose a note value, then click either staff to add notes, rests, or chords.',
+    'Choose a note value, then hover over a rest and click to insert.',
   )
   const [isPlaying, setIsPlaying] = useState(false)
 
-  const systems = buildSystems(
-    measures,
-    timeSignature,
-    placeholderFocus,
-    baseDuration,
+  const systems = useMemo(
+    () => buildSystems(measures, timeSignature, placeholderFocus, baseDuration),
+    [measures, timeSignature, placeholderFocus, baseDuration],
   )
-  const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
-  const beatsPerMeasure = getBeatsPerMeasure(timeSignature)
+  const subdivisionsPerMeasure = useMemo(
+    () => getMeasureSubdivisions(timeSignature),
+    [timeSignature],
+  )
+  const beatsPerMeasure = useMemo(
+    () => getBeatsPerMeasure(timeSignature),
+    [timeSignature],
+  )
   const scoreTop = 36
   const scoreWidth = Math.max(
     SYSTEM_WRAP_WIDTH,
@@ -847,6 +903,18 @@ function App() {
           .setType('singleRight')
           .draw()
 
+        const trebleCursorSub =
+          hoveredRestPosition &&
+          hoveredRestPosition.measureIndex === entry.measureIndex &&
+          hoveredRestPosition.staffId === 'treble'
+            ? hoveredRestPosition.subdivision
+            : null
+        const bassCursorSub =
+          hoveredRestPosition &&
+          hoveredRestPosition.measureIndex === entry.measureIndex &&
+          hoveredRestPosition.staffId === 'bass'
+            ? hoveredRestPosition.subdivision
+            : null
         const trebleData = buildStaffVoiceData(
           entry.measure.trebleItems,
           'treble',
@@ -857,6 +925,7 @@ function App() {
           entry.measureIndex,
           placeholderFocus,
           baseDuration,
+          trebleCursorSub,
         )
         const bassData = buildStaffVoiceData(
           entry.measure.bassItems,
@@ -868,6 +937,7 @@ function App() {
           entry.measureIndex,
           placeholderFocus,
           baseDuration,
+          bassCursorSub,
         )
 
         const trebleVoice = new Voice({ beatValue: 4, numBeats: beatsPerMeasure })
@@ -884,12 +954,21 @@ function App() {
           .addTickables(bassData.anchorNotes)
           .setStave(bassStave)
 
-        const formatter = new Formatter()
-        formatter.joinVoices([trebleVoice, trebleAnchorVoice])
-        formatter.joinVoices([bassVoice, bassAnchorVoice])
-        formatter.format(
-          [trebleVoice, trebleAnchorVoice, bassVoice, bassAnchorVoice],
+        const trebleFormatter = new Formatter()
+        trebleFormatter.joinVoices([trebleVoice, trebleAnchorVoice])
+        trebleFormatter.format(
+          [trebleVoice, trebleAnchorVoice],
           trebleStave.getNoteEndX() - trebleStave.getNoteStartX(),
+          {
+            alignRests: false,
+            context,
+          },
+        )
+        const bassFormatter = new Formatter()
+        bassFormatter.joinVoices([bassVoice, bassAnchorVoice])
+        bassFormatter.format(
+          [bassVoice, bassAnchorVoice],
+          bassStave.getNoteEndX() - bassStave.getNoteStartX(),
           {
             alignRests: false,
             context,
@@ -1013,6 +1092,7 @@ function App() {
     activeItemId,
     beatsPerMeasure,
     eraseHoverItemId,
+    hoveredRestPosition,
     measures,
     scoreHeight,
     scoreTop,
@@ -1092,6 +1172,8 @@ function App() {
     setEraseHoverItemId(null)
   }
 
+
+
   function replaceStaffItems(
     draft: MeasureData[],
     measureIndex: number,
@@ -1134,12 +1216,14 @@ function App() {
         await Tone.start()
       }
 
+      const tonePitch = toTonePitch(pitch, accidental)
+
       if (pianoRef.current?.loaded) {
-        pianoRef.current.triggerAttackRelease(toTonePitch(pitch), 0.45, Tone.now())
+        pianoRef.current.triggerAttackRelease(tonePitch, 0.45, Tone.now())
         return
       }
 
-      ensurePreviewSynth().triggerAttackRelease(toTonePitch(pitch), '8n', Tone.now())
+      ensurePreviewSynth().triggerAttackRelease(tonePitch, '8n', Tone.now())
       void ensurePiano().catch(() => {
         setStatus('Piano samples could not be loaded.')
       })
@@ -1199,17 +1283,25 @@ function App() {
 
           return {
             activeItemId: null,
-            status: `Removed ${getPitchLabel(pitch)} from the ${staffId} chord.`,
+            status: `Removed ${getPitchLabel(pitch, accidental)} from the ${staffId} chord.`,
           }
         }
 
         matchingStartItem.pitches = nextPitches
 
+        // Update accidental for this pitch
+        if (accidental && !pitchExists) {
+          matchingStartItem.accidentals = { ...matchingStartItem.accidentals, [pitch]: accidental }
+        } else if (pitchExists && matchingStartItem.accidentals) {
+          const { [pitch]: _, ...rest } = matchingStartItem.accidentals
+          matchingStartItem.accidentals = Object.keys(rest).length > 0 ? rest : undefined
+        }
+
         return {
           activeItemId: matchingStartItem.id,
           status: pitchExists
-            ? `Updated ${staffId} chord: ${getPitchLabels(nextPitches)}.`
-            : `Expanded ${staffId} chord: ${getPitchLabels(nextPitches)}.`,
+            ? `Updated ${staffId} chord: ${getPitchLabels(nextPitches, matchingStartItem.accidentals)}.`
+            : `Expanded ${staffId} chord: ${getPitchLabels(nextPitches, matchingStartItem.accidentals)}.`,
         }
       }
 
@@ -1226,6 +1318,7 @@ function App() {
               kind,
               pitches: [pitch],
               start,
+              ...(accidental ? { accidentals: { [pitch]: accidental } } : {}),
             }
           : {
               baseDuration,
@@ -1242,7 +1335,7 @@ function App() {
         activeItemId: inserted.id,
         status:
           kind === 'note'
-            ? `Inserted ${getPitchLabel(pitch)} on ${staffId} as a ${selectedDurationName.toLowerCase()} note.`
+            ? `Inserted ${getPitchLabel(pitch, accidental)} on ${staffId} as a ${selectedDurationName.toLowerCase()} note.`
             : `Inserted a ${selectedDurationName.toLowerCase()} rest on ${staffId}.`,
       }
     })
@@ -1405,6 +1498,7 @@ function App() {
 
     if (!pointerTarget) {
       clearHoverState()
+      setHoveredRestPosition(null)
       return
     }
 
@@ -1415,13 +1509,41 @@ function App() {
     })
 
     if (mode === 'note') {
+      // Show the pitch preview (blue note glyph)
       setHoverPreview({
         pitches: [pointerTarget.pitch],
         x: pointerTarget.previewX,
         y: pointerTarget.previewY,
       })
+
+      // Determine the snapped rest position under the cursor
+      const snapped = snapSubdivision(
+        pointerTarget.rawSubdivision,
+        baseDuration,
+        dotted,
+        subdivisionsPerMeasure,
+      )
+      const staffId = pointerTarget.hitBox.staffId
+      const mIdx = pointerTarget.hitBox.index
+      const items = getItemsForStaff(measures[mIdx], staffId)
+      const length = getDurationSubdivisions(baseDuration, dotted)
+      const end = snapped + length
+
+      // Only highlight if the position is a rest/placeholder (not an existing note)
+      const hasNoteConflict = items.some(
+        (item) =>
+          item.kind === 'note' &&
+          rangesOverlap(item.start, itemEnd(item), snapped, end),
+      )
+
+      if (!hasNoteConflict) {
+        setHoveredRestPosition({ measureIndex: mIdx, staffId, subdivision: snapped })
+      } else {
+        setHoveredRestPosition(null)
+      }
     } else {
       setHoverPreview(null)
+      setHoveredRestPosition(null)
     }
 
     if (mode === 'erase') {
@@ -1433,6 +1555,7 @@ function App() {
 
   function handleScoreLeave() {
     clearHoverState()
+    setHoveredRestPosition(null)
   }
 
   function handleScoreClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -1481,6 +1604,7 @@ function App() {
       return
     }
 
+    // Insert Note mode: single-click insert at the hovered rest position
     insertAtPosition(
       pointerTarget.hitBox.index,
       pointerTarget.hitBox.staffId,
@@ -1589,6 +1713,10 @@ function App() {
     setBaseDuration(nextDuration)
   }
 
+  function selectMode(nextMode: EditMode) {
+    setMode(nextMode)
+  }
+
   function changeTimeSignature(nextTimeSignature: TimeSignature) {
     if (nextTimeSignature === timeSignature) {
       return
@@ -1633,6 +1761,34 @@ function App() {
 
     setActiveItemId(null)
     clearHoverState()
+  }
+
+  function loadFurElise() {
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    setTimeSignature('3/4')
+    setMeasures(createFurEliseMeasures())
+    setTempoBpm(72)
+    setBaseDuration('8')
+    setActiveItemId(null)
+    clearHoverState()
+    setStatus('Loaded demo: Fur Elise (A theme). Press Play to listen!')
+  }
+
+  function clearScore() {
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    const numMeasures = measures.length
+    setMeasures(
+      Array.from({ length: Math.max(numMeasures, 4) }, (_, i) => createMeasure(`measure-${i + 1}`)),
+    )
+    setActiveItemId(null)
+    clearHoverState()
+    setStatus('Score cleared. Start composing!')
   }
 
   return (
@@ -1734,31 +1890,62 @@ function App() {
           </div>
 
           <div className="tool-group">
+            <span className="group-label">Accidentals</span>
+            <button
+              aria-label="Natural"
+              className={accidental === 'n' ? 'tool tool--acc active' : 'tool tool--acc'}
+              onClick={() => setAccidental((c) => (c === 'n' ? null : 'n'))}
+              title="Natural"
+              type="button"
+            >
+              <span className="acc-symbol">&#x266E;</span>
+            </button>
+            <button
+              aria-label="Sharp"
+              className={accidental === '#' ? 'tool tool--acc active' : 'tool tool--acc'}
+              onClick={() => setAccidental((c) => (c === '#' ? null : '#'))}
+              title="Sharp"
+              type="button"
+            >
+              <span className="acc-symbol">&#x266F;</span>
+            </button>
+            <button
+              aria-label="Flat"
+              className={accidental === 'b' ? 'tool tool--acc active' : 'tool tool--acc'}
+              onClick={() => setAccidental((c) => (c === 'b' ? null : 'b'))}
+              title="Flat"
+              type="button"
+            >
+              <span className="acc-symbol">&#x266D;</span>
+            </button>
+          </div>
+
+          <div className="tool-group">
             <span className="group-label">Action</span>
             <button
               className={mode === 'note' ? 'tool active' : 'tool'}
-              onClick={() => setMode('note')}
+              onClick={() => selectMode('note')}
               type="button"
             >
               Insert Note
             </button>
             <button
               className={mode === 'rest' ? 'tool active' : 'tool'}
-              onClick={() => setMode('rest')}
+              onClick={() => selectMode('rest')}
               type="button"
             >
               Insert Rest
             </button>
             <button
               className={mode === 'tie' ? 'tool active' : 'tool'}
-              onClick={() => setMode('tie')}
+              onClick={() => selectMode('tie')}
               type="button"
             >
               Tie
             </button>
             <button
               className={mode === 'erase' ? 'tool active' : 'tool'}
-              onClick={() => setMode('erase')}
+              onClick={() => selectMode('erase')}
               type="button"
             >
               Erase
@@ -1786,6 +1973,16 @@ function App() {
             </button>
             <button className="tool" onClick={removeMeasure} type="button">
               - Bar
+            </button>
+          </div>
+
+          <div className="tool-group compact">
+            <span className="group-label">Score</span>
+            <button className="tool" onClick={loadFurElise} title="Load Fur Elise Demo" type="button">
+              🎹 Demo
+            </button>
+            <button className="tool" onClick={clearScore} title="Clear all notes" type="button">
+              Clear
             </button>
           </div>
         </div>
@@ -1838,15 +2035,9 @@ function App() {
           <section className="panel">
             <h2>What Changed</h2>
             <ul>
-              <li>Empty bars stay on the quarter-rest skeleton until you actually write into that beat.</li>
-              <li>Active eighth beats now show two eighth-rest slots, while active sixteenth beats start as 16th + 16th + 8th and only split the last rest once the beat gets denser.</li>
-              <li>Eighth and sixteenth beats still widen automatically, but with a tighter spacing ratio so the bar grows without stretching too far.</li>
-              <li>Treble and bass placeholders only react on the staff and beat you are editing, so shaping the bass no longer scrambles the treble view.</li>
-              <li>Clicks now snap to the nearest slot instead of always falling left.</li>
-              <li>Hover previews and inserted notes now use the same placement bounds, so half notes and other longer values land where they preview.</li>
-              <li>Pitch picking now lines up with the note you actually click.</li>
-              <li>Tempo can be adjusted from the top bar, with an optional metronome.</li>
-              <li>Playback now shows a vertical playhead across both staves.</li>
+              <li>Hover over any rest to highlight it and see a teardrop indicator — click to insert directly.</li>
+              <li>Treble and bass staves are fully independent — editing one never distorts the other.</li>
+              <li>Sixteenth rests are now evenly spaced within the beat and no longer overlap neighbouring quarter rests.</li>
             </ul>
           </section>
 
@@ -1877,6 +2068,12 @@ function App() {
                       left: `${playhead.x}px`,
                       top: `${playhead.top}px`,
                     }}
+                  />
+                ) : null}
+                {mode === 'note' && hoveredRestPosition ? (
+                  <HoverRestIndicator
+                    hitBoxes={hitBoxesRef.current}
+                    position={hoveredRestPosition}
                   />
                 ) : null}
                 {mode === 'note' && hoverPreview ? (

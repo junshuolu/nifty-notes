@@ -13,6 +13,7 @@ import {
   TIME_SIGNATURE_OPTIONS,
   TREBLE_TOP_LINE_INDEX,
   TREBLE_PITCHES_FROM_TOP,
+  type AccidentalType,
   type BaseDuration,
   type ContiguousTarget,
   type MeasureData,
@@ -82,22 +83,23 @@ export function getDurationPreviewClass(baseDuration: BaseDuration): string {
   )
 }
 
-export function toTonePitch(pitch: NotePitch): string {
+export function toTonePitch(pitch: NotePitch, accidental?: AccidentalType | null): string {
   const [note, octave] = pitch.split('/')
-  return `${note.toUpperCase()}${octave}`
+  const acc = accidental === '#' ? '#' : accidental === 'b' ? 'b' : ''
+  return `${note.toUpperCase()}${acc}${octave}`
 }
 
 export function cloneMeasures(measures: MeasureData[]): MeasureData[] {
   return measures.map((measure) => ({
     bassItems: measure.bassItems.map((item) =>
       item.kind === 'note'
-        ? { ...item, pitches: [...item.pitches] }
+        ? { ...item, pitches: [...item.pitches], accidentals: item.accidentals ? { ...item.accidentals } : undefined }
         : { ...item },
     ),
     id: measure.id,
     trebleItems: measure.trebleItems.map((item) =>
       item.kind === 'note'
-        ? { ...item, pitches: [...item.pitches] }
+        ? { ...item, pitches: [...item.pitches], accidentals: item.accidentals ? { ...item.accidentals } : undefined }
         : { ...item },
     ),
   }))
@@ -276,7 +278,7 @@ export function buildPlaybackNotes(
 
         segments.push({
           durationSeconds: totalSubdivisions * subdivisionSeconds,
-          notes: item.pitches.map(toTonePitch),
+          notes: item.pitches.map((p) => toTonePitch(p, item.accidentals?.[p])),
           startSeconds:
             (measureIndex * subdivisionsPerMeasure + item.start) * subdivisionSeconds,
         })
@@ -328,13 +330,14 @@ export function pitchToY(
   return topLineY + (safeIndex - getTopLineIndex(staffId)) * (spacing / 2)
 }
 
-export function getPitchLabel(pitch: NotePitch): string {
+export function getPitchLabel(pitch: NotePitch, accidental?: AccidentalType | null): string {
   const [note, octave] = pitch.split('/')
-  return `${note.toUpperCase()}${octave}`
+  const accSymbol = accidental === '#' ? '\u266F' : accidental === 'b' ? '\u266D' : accidental === 'n' ? '\u266E' : ''
+  return `${note.toUpperCase()}${accSymbol}${octave}`
 }
 
-export function getPitchLabels(pitches: NotePitch[]): string {
-  return pitches.map(getPitchLabel).join(' + ')
+export function getPitchLabels(pitches: NotePitch[], accidentals?: Record<string, AccidentalType>): string {
+  return pitches.map((p) => getPitchLabel(p, accidentals?.[p])).join(' + ')
 }
 
 export function getSnapStep(baseDuration: BaseDuration, dotted: boolean): number {
@@ -364,7 +367,7 @@ const MEASURE_DECORATION_WIDTH =
   SYSTEM_FIRST_MEASURE_WIDTH - SYSTEM_MEASURE_WIDTH
 const VISUAL_UNITS_PER_BEAT = 2
 const EIGHTH_VISUAL_UNITS_PER_BEAT = 3
-const SIXTEENTH_VISUAL_UNITS_PER_BEAT = 4
+const SIXTEENTH_VISUAL_UNITS_PER_BEAT = 3.5
 const THIRTY_SECOND_VISUAL_UNITS_PER_BEAT = 6
 const VISUAL_UNIT_WIDTH = SYSTEM_MEASURE_WIDTH / (4 * VISUAL_UNITS_PER_BEAT)
 

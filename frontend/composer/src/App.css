@@ -177,9 +177,23 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 54px;
-  height: 54px;
+  width: 44px;
+  height: 44px;
   padding: 0;
+}
+
+.tool--acc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.acc-symbol {
+  font-size: 1.5rem;
+  line-height: 1;
 }
 
 .tool:hover:not(:disabled) {
@@ -417,6 +431,20 @@
   inset: 0;
   cursor: crosshair;
   background: transparent;
+}
+
+/* Hover rest indicator: teardrop icon below the highlighted rest */
+.hover-rest-indicator {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-8px, 2px);
+  z-index: 4;
+  animation: hover-rest-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes hover-rest-pulse {
+  0%, 100% { opacity: 0.85; transform: translate(-8px, 2px) scale(1); }
+  50% { opacity: 0.55; transform: translate(-8px, 2px) scale(1.15); }
 }
 
 .cursor-preview {
