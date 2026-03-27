@@ -422,7 +422,7 @@
 .cursor-preview {
   position: absolute;
   pointer-events: none;
-  transform: translate(-9px, -44px);
+  transform: translate(-10px, -44px);
 }
 
 .cursor-note {

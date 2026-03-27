@@ -28,7 +28,6 @@ import {
   MIN_BPM,
   NOTE_COLOR,
   PIANO_SAMPLE_URLS,
-  PLACEHOLDER_DURATIONS,
   SCORE_PADDING_BOTTOM,
   STAFF_IDS,
   SUBDIVISIONS_PER_BEAT,
@@ -82,12 +81,21 @@ import {
 } from './composer/score'
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
-const REST_VISUAL_SHIFT = 7
+const NOTE_VISUAL_SHIFT = 4
+const REST_VISUAL_SHIFT = 11
+const MEASURE_EDGE_PADDING = 3
+const GRID_EDGE_PADDING = 10
 
 type PlayheadState = {
   height: number
   top: number
   x: number
+}
+
+type PlaceholderFocus = {
+  beatStart: number
+  measureIndex: number
+  staffId: StaffId
 }
 
 function clampTempo(nextTempo: number) {
@@ -193,12 +201,7 @@ function createVisualNote(
         ? ACTIVE_COLOR
         : NOTE_COLOR
 
-  if (item.dots > 0) {
-    Dot.buildAndAttach([note], { all: true })
-    Dot.getDots(note).forEach((dot) => {
-      dot.setStyle({ fillStyle: color, strokeStyle: color })
-    })
-  }
+  applyDots(note, item.dots, color)
 
   styleNote(note, color)
 
@@ -207,6 +210,17 @@ function createVisualNote(
   }
 
   return note
+}
+
+function applyDots(note: StaveNote, dots: number, color: string) {
+  if (dots <= 0) {
+    return
+  }
+
+  Dot.buildAndAttach([note], { all: true })
+  Dot.getDots(note).forEach((dot) => {
+    dot.setStyle({ fillStyle: color, strokeStyle: color })
+  })
 }
 
 function createPlaceholder(
@@ -229,39 +243,134 @@ function createAnchorNotes(subdivisionsPerMeasure: number): GhostNote[] {
   return Array.from({ length: subdivisionsPerMeasure }, () => new GhostNote('32'))
 }
 
-function getPlaceholderDuration(
+function getBeatPlaceholderLength(
   items: ScoreItem[],
-  subdivision: number,
-  subdivisionsPerMeasure: number,
-): RenderDuration {
-  const nextStart =
-    findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
-  const maxLength = Math.min(
-    nextStart - subdivision,
-    subdivisionsPerMeasure - subdivision,
-  )
-  const offsetWithinBeat = subdivision % SUBDIVISIONS_PER_BEAT
-  const roomUntilBeat =
-    offsetWithinBeat === 0 ? SUBDIVISIONS_PER_BEAT : SUBDIVISIONS_PER_BEAT - offsetWithinBeat
+  beatStart: number,
+) {
+  const beatEnd = beatStart + SUBDIVISIONS_PER_BEAT
+  let smallestLength: number | null = null
 
-  if (
-    offsetWithinBeat === 0 &&
-    maxLength >= getDurationSubdivisions('q', false)
-  ) {
+  items.forEach((item) => {
+    if (item.start >= beatEnd || itemEnd(item) <= beatStart) {
+      return
+    }
+
+    const length = getItemSubdivisions(item)
+
+    if (smallestLength === null || length < smallestLength) {
+      smallestLength = length
+    }
+  })
+
+  if (smallestLength === null || smallestLength >= 8) {
+    return 8
+  }
+
+  if (smallestLength >= 4) {
+    return 4
+  }
+
+  if (smallestLength >= 2) {
+    return 2
+  }
+
+  return 1
+}
+
+function getPlaceholderDurationForLength(length: number): RenderDuration {
+  if (length >= 8) {
     return 'q'
   }
 
-  return (
-    PLACEHOLDER_DURATIONS.find((duration) => {
-      const length = getDurationSubdivisions(duration, false)
+  if (length >= 4) {
+    return '8'
+  }
 
-      if (length > maxLength) {
-        return false
-      }
+  if (length >= 2) {
+    return '16'
+  }
 
-      return offsetWithinBeat === 0 || length <= roomUntilBeat
-    }) ?? '32'
-  )
+  return '32'
+}
+
+function clampPlaceholderLength(maxLength: number, preferredLength: number) {
+  if (preferredLength <= maxLength) {
+    return preferredLength
+  }
+
+  if (maxLength >= 8) {
+    return 8
+  }
+
+  if (maxLength >= 4) {
+    return 4
+  }
+
+  if (maxLength >= 2) {
+    return 2
+  }
+
+  return 1
+}
+
+function beatContainsSixteenthContent(
+  items: ScoreItem[],
+  beatStart: number,
+) {
+  const beatEnd = beatStart + SUBDIVISIONS_PER_BEAT
+
+  return items.some((item) => {
+    if (item.start >= beatEnd || itemEnd(item) <= beatStart) {
+      return false
+    }
+
+    return getItemSubdivisions(item) <= 2
+  })
+}
+
+function getFocusedPlaceholderLength(
+  items: ScoreItem[],
+  subdivision: number,
+  subdivisionsPerMeasure: number,
+  focusedBaseDuration: BaseDuration,
+) {
+  const beatStart =
+    Math.floor(subdivision / SUBDIVISIONS_PER_BEAT) * SUBDIVISIONS_PER_BEAT
+  const beatEnd = Math.min(beatStart + SUBDIVISIONS_PER_BEAT, subdivisionsPerMeasure)
+  const nextStart =
+    findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
+  const maxLength = Math.min(nextStart - subdivision, beatEnd - subdivision)
+
+  if (focusedBaseDuration === '8') {
+    return clampPlaceholderLength(maxLength, 4)
+  }
+
+  if (focusedBaseDuration === '16') {
+    const preferredLength =
+      subdivision < beatStart + 4 || beatContainsSixteenthContent(items, beatStart)
+        ? 2
+        : 4
+
+    return clampPlaceholderLength(maxLength, preferredLength)
+  }
+
+  return getPlaceholderLength(items, subdivision, subdivisionsPerMeasure)
+}
+
+function getPlaceholderLength(
+  items: ScoreItem[],
+  subdivision: number,
+  subdivisionsPerMeasure: number,
+) {
+  const beatStart =
+    Math.floor(subdivision / SUBDIVISIONS_PER_BEAT) * SUBDIVISIONS_PER_BEAT
+  const beatEnd = Math.min(beatStart + SUBDIVISIONS_PER_BEAT, subdivisionsPerMeasure)
+  const nextStart =
+    findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
+  const maxLength = Math.min(nextStart - subdivision, beatEnd - subdivision)
+  const preferredLength = getBeatPlaceholderLength(items, beatStart)
+
+  return clampPlaceholderLength(maxLength, preferredLength)
 }
 
 function buildStaffVoiceData(
@@ -271,11 +380,19 @@ function buildStaffVoiceData(
   eraseHoverItemId: string | null,
   noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>,
   subdivisionsPerMeasure: number,
+  measureIndex: number,
+  placeholderFocus: PlaceholderFocus | null,
+  focusedBaseDuration: BaseDuration,
 ) {
   const notes: StaveNote[] = []
   const lengths: number[] = []
   const starts: number[] = []
   let subdivision = 0
+  const focusedBeatStart =
+    placeholderFocus?.measureIndex === measureIndex &&
+    placeholderFocus.staffId === staffId
+      ? placeholderFocus.beatStart
+      : null
 
   while (subdivision < subdivisionsPerMeasure) {
     const item = findStartingItem(items, subdivision)
@@ -296,15 +413,23 @@ function buildStaffVoiceData(
       continue
     }
 
-    const placeholderDuration = getPlaceholderDuration(
-      items,
-      subdivision,
-      subdivisionsPerMeasure,
-    )
-    lengths.push(getDurationSubdivisions(placeholderDuration, false))
+    const isFocusedBeat =
+      focusedBeatStart !== null &&
+      subdivision >= focusedBeatStart &&
+      subdivision < focusedBeatStart + SUBDIVISIONS_PER_BEAT
+    const placeholderLength = isFocusedBeat
+      ? getFocusedPlaceholderLength(
+          items,
+          subdivision,
+          subdivisionsPerMeasure,
+          focusedBaseDuration,
+        )
+      : getPlaceholderLength(items, subdivision, subdivisionsPerMeasure)
+    const placeholderDuration = getPlaceholderDurationForLength(placeholderLength)
+    lengths.push(placeholderLength)
     starts.push(subdivision)
     notes.push(createPlaceholder(placeholderDuration, staffId, NOTE_COLOR))
-    subdivision += getDurationSubdivisions(placeholderDuration, false)
+    subdivision += placeholderLength
   }
 
   return {
@@ -350,17 +475,112 @@ function resolveClosestSubdivision(xBySubdivision: number[], x: number) {
   return bestIndex
 }
 
+function getNoteExtents(length: number, hasFlag: boolean, dotted = false) {
+  const left = 10
+  let right = 14
+
+  if (length <= 2 || hasFlag) {
+    right = 18
+  } else if (length <= 4) {
+    right = 16
+  } else if (length >= 16) {
+    right = 12
+  }
+
+  if (dotted) {
+    right += 6
+  }
+
+  return { left, right }
+}
+
+function getRestExtents() {
+  return { left: 7, right: 7 }
+}
+
+function getPreviewExtents(
+  previewBaseDuration: BaseDuration,
+  previewDotted: boolean,
+) {
+  return getNoteExtents(
+    getDurationSubdivisions(previewBaseDuration, previewDotted),
+    previewBaseDuration === '8' || previewBaseDuration === '16',
+    previewDotted,
+  )
+}
+
+function getTickableExtents(note: StaveNote, length: number) {
+  if (note.isRest()) {
+    return getRestExtents()
+  }
+
+  return getNoteExtents(length, note.hasFlag())
+}
+
+function clampAnchorXToMeasure(
+  anchorX: number,
+  measureLeft: number,
+  measureRight: number,
+  leftExtent: number,
+  rightExtent: number,
+) {
+  return Math.min(
+    measureRight - rightExtent - MEASURE_EDGE_PADDING,
+    Math.max(measureLeft + leftExtent + MEASURE_EDGE_PADDING, anchorX),
+  )
+}
+
+function clampPreviewX(
+  previewX: number,
+  measureLeft: number,
+  measureRight: number,
+  previewBaseDuration: BaseDuration,
+  previewDotted: boolean,
+) {
+  const { left, right } = getPreviewExtents(
+    previewBaseDuration,
+    previewDotted,
+  )
+
+  return Math.min(
+    measureRight - right - MEASURE_EDGE_PADDING,
+    Math.max(measureLeft + left + MEASURE_EDGE_PADDING, previewX),
+  )
+}
+
 function applyFixedSubdivisionGrid(
   stave: Stave,
   anchorNotes: GhostNote[],
-  subdivisionsPerMeasure: number,
+  beatUnits: number[],
+  noteAreaWidth: number,
 ) {
   const stavePadding = Metrics.get('Stave.padding', 0)
-  const usableWidth = stave.getNoteEndX() - stave.getNoteStartX()
-  const subdivisionWidth = usableWidth / subdivisionsPerMeasure
+  const totalUnits = beatUnits.reduce((sum, units) => sum + units, 0)
+  const usableWidth = Math.max(
+    1,
+    Math.min(
+      noteAreaWidth,
+      stave.getNoteEndX() - stave.getNoteStartX(),
+    ) - GRID_EDGE_PADDING * 2,
+  )
+  const unitWidth = usableWidth / Math.max(totalUnits, 1)
+  const beatOffsets: number[] = []
+  let accumulatedOffset = GRID_EDGE_PADDING
+
+  beatUnits.forEach((units) => {
+    beatOffsets.push(accumulatedOffset)
+    accumulatedOffset += units * unitWidth
+  })
 
   return anchorNotes.map((note, subdivision) => {
-    const relativeX = subdivisionWidth * subdivision + subdivisionWidth / 2
+    const beatIndex = Math.floor(subdivision / SUBDIVISIONS_PER_BEAT)
+    const beatOffset = beatOffsets[beatIndex] ?? GRID_EDGE_PADDING
+    const unitsInBeat = beatUnits[beatIndex] ?? 2
+    const subdivisionWidth = (unitsInBeat * unitWidth) / SUBDIVISIONS_PER_BEAT
+    const relativeX =
+      beatOffset +
+      subdivisionWidth * (subdivision % SUBDIVISIONS_PER_BEAT) +
+      subdivisionWidth / 2
     const absoluteX = stave.getNoteStartX() + stavePadding + relativeX
     note.getTickContext().setX(relativeX)
     return absoluteX
@@ -391,8 +611,18 @@ function positionTickablesOnGrid(
     }
 
     const anchorX =
-      (startX + endX) / 2 - (note.isRest() ? REST_VISUAL_SHIFT : 0)
-    const relativeX = anchorX - stave.getNoteStartX() - stavePadding
+      (startX + endX) / 2 -
+      NOTE_VISUAL_SHIFT -
+      (note.isRest() ? REST_VISUAL_SHIFT : 0)
+    const { left, right } = getTickableExtents(note, length)
+    const clampedAnchorX = clampAnchorXToMeasure(
+      anchorX,
+      stave.getNoteStartX(),
+      stave.getNoteEndX(),
+      left,
+      right,
+    )
+    const relativeX = clampedAnchorX - stave.getNoteStartX() - stavePadding
     note.getTickContext().setX(relativeX)
   })
 }
@@ -421,17 +651,36 @@ function App() {
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
   const [eraseHoverItemId, setEraseHoverItemId] = useState<string | null>(null)
   const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null)
+  const [placeholderFocus, setPlaceholderFocus] = useState<PlaceholderFocus | null>(
+    null,
+  )
   const [playhead, setPlayhead] = useState<PlayheadState | null>(null)
   const [status, setStatus] = useState(
     'Choose a note value, then click either staff to add notes, rests, or chords.',
   )
   const [isPlaying, setIsPlaying] = useState(false)
 
-  const systems = buildSystems(measures)
+  const systems = buildSystems(
+    measures,
+    timeSignature,
+    placeholderFocus,
+    baseDuration,
+  )
   const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature)
   const scoreTop = 36
-  const scoreWidth = SYSTEM_WRAP_WIDTH
+  const scoreWidth = Math.max(
+    SYSTEM_WRAP_WIDTH,
+    systems.reduce(
+      (widest, system) =>
+        Math.max(
+          widest,
+          system.reduce((sum, entry) => sum + entry.width, 0) +
+            SYSTEM_SIDE_PADDING * 2,
+        ),
+      0,
+    ),
+  )
   const scoreHeight =
     scoreTop +
     (systems.length - 1) * SYSTEM_GAP_Y +
@@ -605,6 +854,9 @@ function App() {
           eraseHoverItemId,
           noteRegistry,
           subdivisionsPerMeasure,
+          entry.measureIndex,
+          placeholderFocus,
+          baseDuration,
         )
         const bassData = buildStaffVoiceData(
           entry.measure.bassItems,
@@ -613,6 +865,9 @@ function App() {
           eraseHoverItemId,
           noteRegistry,
           subdivisionsPerMeasure,
+          entry.measureIndex,
+          placeholderFocus,
+          baseDuration,
         )
 
         const trebleVoice = new Voice({ beatValue: 4, numBeats: beatsPerMeasure })
@@ -641,33 +896,32 @@ function App() {
           },
         )
 
-        const xBySubdivision = applyFixedSubdivisionGrid(
+        const trebleXBySubdivision = applyFixedSubdivisionGrid(
           trebleStave,
           trebleData.anchorNotes,
-          subdivisionsPerMeasure,
+          entry.trebleBeatUnits,
+          entry.trebleNoteAreaWidth,
         )
-
-        bassData.anchorNotes.forEach((note, subdivision) => {
-          const relativeX =
-            xBySubdivision[subdivision] -
-            bassStave.getNoteStartX() -
-            Metrics.get('Stave.padding', 0)
-          note.getTickContext().setX(relativeX)
-        })
+        const bassXBySubdivision = applyFixedSubdivisionGrid(
+          bassStave,
+          bassData.anchorNotes,
+          entry.bassBeatUnits,
+          entry.bassNoteAreaWidth,
+        )
 
         positionTickablesOnGrid(
           trebleStave,
           trebleData.notes,
           trebleData.lengths,
           trebleData.starts,
-          xBySubdivision,
+          trebleXBySubdivision,
         )
         positionTickablesOnGrid(
           bassStave,
           bassData.notes,
           bassData.lengths,
           bassData.starts,
-          xBySubdivision,
+          bassXBySubdivision,
         )
 
         const beamGroups = [new Fraction(1, 4)]
@@ -694,7 +948,7 @@ function App() {
           spacing: trebleStave.getSpacingBetweenLines(),
           staffId: 'treble',
           topLineY: trebleStave.getYForLine(0),
-          xBySubdivision,
+          xBySubdivision: trebleXBySubdivision,
         })
 
         hitBoxes.push({
@@ -706,7 +960,7 @@ function App() {
           spacing: bassStave.getSpacingBetweenLines(),
           staffId: 'bass',
           topLineY: bassStave.getYForLine(0),
-          xBySubdivision,
+          xBySubdivision: bassXBySubdivision,
         })
 
         currentX += entry.width
@@ -1101,6 +1355,8 @@ function App() {
       dotted,
       subdivisionsPerMeasure,
     )
+    const beatStart =
+      Math.floor(snappedSubdivision / SUBDIVISIONS_PER_BEAT) * SUBDIVISIONS_PER_BEAT
     const previewLength = getDurationSubdivisions(baseDuration, dotted)
     const previewLastSubdivision = Math.min(
       snappedSubdivision + Math.max(previewLength - 1, 0),
@@ -1110,7 +1366,13 @@ function App() {
       hitBox.xBySubdivision[snappedSubdivision] ?? hitBox.xBySubdivision[0] ?? hitBox.left
     const previewEndX =
       hitBox.xBySubdivision[previewLastSubdivision] ?? previewStartX
-    const previewX = (previewStartX + previewEndX) / 2
+    const previewX = clampPreviewX(
+      (previewStartX + previewEndX) / 2 - NOTE_VISUAL_SHIFT,
+      hitBox.left,
+      hitBox.right,
+      baseDuration,
+      dotted,
+    )
     const pitch = yToPitch(y, hitBox.topLineY, hitBox.spacing, hitBox.staffId)
     const previewY = pitchToY(
       pitch,
@@ -1124,11 +1386,13 @@ function App() {
     )
 
     return {
+      beatStart,
       hitBox,
       pitch,
       previewX,
       previewY,
       rawSubdivision,
+      snappedSubdivision,
       targetItem,
     }
   }
@@ -1143,6 +1407,12 @@ function App() {
       clearHoverState()
       return
     }
+
+    setPlaceholderFocus({
+      beatStart: pointerTarget.beatStart,
+      measureIndex: pointerTarget.hitBox.index,
+      staffId: pointerTarget.hitBox.staffId,
+    })
 
     if (mode === 'note') {
       setHoverPreview({
@@ -1175,6 +1445,12 @@ function App() {
       setStatus('Click directly inside either staff.')
       return
     }
+
+    setPlaceholderFocus({
+      beatStart: pointerTarget.beatStart,
+      measureIndex: pointerTarget.hitBox.index,
+      staffId: pointerTarget.hitBox.staffId,
+    })
 
     if (mode === 'erase') {
       eraseAtPosition(
@@ -1562,7 +1838,12 @@ function App() {
           <section className="panel">
             <h2>What Changed</h2>
             <ul>
-              <li>Rests now sit slightly further left, so the bar reads more naturally.</li>
+              <li>Empty bars stay on the quarter-rest skeleton until you actually write into that beat.</li>
+              <li>Active eighth beats now show two eighth-rest slots, while active sixteenth beats start as 16th + 16th + 8th and only split the last rest once the beat gets denser.</li>
+              <li>Eighth and sixteenth beats still widen automatically, but with a tighter spacing ratio so the bar grows without stretching too far.</li>
+              <li>Treble and bass placeholders only react on the staff and beat you are editing, so shaping the bass no longer scrambles the treble view.</li>
+              <li>Clicks now snap to the nearest slot instead of always falling left.</li>
+              <li>Hover previews and inserted notes now use the same placement bounds, so half notes and other longer values land where they preview.</li>
               <li>Pitch picking now lines up with the note you actually click.</li>
               <li>Tempo can be adjusted from the top bar, with an optional metronome.</li>
               <li>Playback now shows a vertical playhead across both staves.</li>

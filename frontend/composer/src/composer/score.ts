@@ -356,35 +356,180 @@ export function snapSubdivision(
   const length = getDurationSubdivisions(baseDuration, dotted)
   const maxStart = Math.max(0, subdivisionsPerMeasure - length)
   const step = getSnapStep(baseDuration, dotted)
-  const snapped = Math.floor(rawSubdivision / step) * step
+  const snapped = Math.round(rawSubdivision / step) * step
   return Math.min(snapped, maxStart)
 }
 
-export function getSystemMeasureWidth(measureIndexInSystem: number): number {
-  return measureIndexInSystem === 0
-    ? SYSTEM_FIRST_MEASURE_WIDTH
-    : SYSTEM_MEASURE_WIDTH
+const MEASURE_DECORATION_WIDTH =
+  SYSTEM_FIRST_MEASURE_WIDTH - SYSTEM_MEASURE_WIDTH
+const VISUAL_UNITS_PER_BEAT = 2
+const EIGHTH_VISUAL_UNITS_PER_BEAT = 3
+const SIXTEENTH_VISUAL_UNITS_PER_BEAT = 4
+const THIRTY_SECOND_VISUAL_UNITS_PER_BEAT = 6
+const VISUAL_UNIT_WIDTH = SYSTEM_MEASURE_WIDTH / (4 * VISUAL_UNITS_PER_BEAT)
+
+function getSmallestBeatItemLength(
+  items: ScoreItem[],
+  beatStart: number,
+): number | null {
+  const beatEnd = beatStart + SUBDIVISIONS_PER_BEAT
+  let smallestLength: number | null = null
+
+  items.forEach((item) => {
+    if (item.start >= beatEnd || itemEnd(item) <= beatStart) {
+      return
+    }
+
+    const length = getItemSubdivisions(item)
+
+    if (smallestLength === null || length < smallestLength) {
+      smallestLength = length
+    }
+  })
+
+  return smallestLength
 }
 
-export function buildSystems(measures: MeasureData[]) {
+function getBeatVisualUnitsForItems(
+  items: ScoreItem[],
+  beatIndex: number,
+): number {
+  const beatStart = beatIndex * SUBDIVISIONS_PER_BEAT
+  const smallestLength = getSmallestBeatItemLength(items, beatStart)
+
+  if (smallestLength === null || smallestLength >= 8) {
+    return VISUAL_UNITS_PER_BEAT
+  }
+
+  if (smallestLength >= 4) {
+    return EIGHTH_VISUAL_UNITS_PER_BEAT
+  }
+
+  if (smallestLength >= 2) {
+    return SIXTEENTH_VISUAL_UNITS_PER_BEAT
+  }
+
+  return THIRTY_SECOND_VISUAL_UNITS_PER_BEAT
+}
+
+function getFocusedBeatVisualUnits(
+  focusedBaseDuration: BaseDuration | null,
+) {
+  if (focusedBaseDuration === '16') {
+    return SIXTEENTH_VISUAL_UNITS_PER_BEAT
+  }
+
+  if (focusedBaseDuration === '8') {
+    return EIGHTH_VISUAL_UNITS_PER_BEAT
+  }
+
+  return VISUAL_UNITS_PER_BEAT
+}
+
+function getStaffBeatVisualUnits(
+  items: ScoreItem[],
+  beatsPerMeasure: number,
+  focusedBeatStart: number | null,
+  focusedBaseDuration: BaseDuration | null,
+) {
+  return Array.from({ length: beatsPerMeasure }, (_, beatIndex) =>
+    Math.max(
+      getBeatVisualUnitsForItems(items, beatIndex),
+      focusedBeatStart === beatIndex * SUBDIVISIONS_PER_BEAT &&
+      focusedBaseDuration !== null
+        ? getFocusedBeatVisualUnits(focusedBaseDuration)
+        : VISUAL_UNITS_PER_BEAT,
+    ),
+  )
+}
+
+export function buildSystems(
+  measures: MeasureData[],
+  timeSignature: TimeSignature,
+  placeholderFocus: {
+    beatStart: number
+    measureIndex: number
+    staffId: StaffId
+  } | null,
+  baseDuration: BaseDuration,
+) {
   const systems: Array<
-    Array<{ measure: MeasureData; measureIndex: number; width: number }>
+    Array<{
+      bassNoteAreaWidth: number
+      bassBeatUnits: number[]
+      measure: MeasureData
+      measureIndex: number
+      noteAreaWidth: number
+      trebleNoteAreaWidth: number
+      trebleBeatUnits: number[]
+      width: number
+    }>
   > = []
-  let currentSystem: Array<{ measure: MeasureData; measureIndex: number; width: number }> =
-    []
+  let currentSystem: Array<{
+    bassNoteAreaWidth: number
+    bassBeatUnits: number[]
+    measure: MeasureData
+    measureIndex: number
+    noteAreaWidth: number
+    trebleNoteAreaWidth: number
+    trebleBeatUnits: number[]
+    width: number
+  }> = []
   let currentWidth = 0
   const maxWidth = SYSTEM_WRAP_WIDTH - SYSTEM_SIDE_PADDING * 2
+  const beatsPerMeasure = getBeatsPerMeasure(timeSignature)
 
   measures.forEach((measure, measureIndex) => {
-    const measureWidth = getSystemMeasureWidth(currentSystem.length)
+    const focusedTrebleBeatStart =
+      placeholderFocus?.measureIndex === measureIndex &&
+      placeholderFocus.staffId === 'treble'
+        ? placeholderFocus.beatStart
+        : null
+    const focusedBassBeatStart =
+      placeholderFocus?.measureIndex === measureIndex &&
+      placeholderFocus.staffId === 'bass'
+        ? placeholderFocus.beatStart
+        : null
+    const trebleBeatUnits = getStaffBeatVisualUnits(
+      measure.trebleItems,
+      beatsPerMeasure,
+      focusedTrebleBeatStart,
+      focusedTrebleBeatStart === null ? null : baseDuration,
+    )
+    const bassBeatUnits = getStaffBeatVisualUnits(
+      measure.bassItems,
+      beatsPerMeasure,
+      focusedBassBeatStart,
+      focusedBassBeatStart === null ? null : baseDuration,
+    )
+    const trebleNoteAreaWidth = Math.ceil(
+      trebleBeatUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
+    )
+    const bassNoteAreaWidth = Math.ceil(
+      bassBeatUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
+    )
+    const noteAreaWidth = Math.max(trebleNoteAreaWidth, bassNoteAreaWidth)
+    const measureWidth =
+      noteAreaWidth + (currentSystem.length === 0 ? MEASURE_DECORATION_WIDTH : 0)
+
     if (currentSystem.length > 0 && currentWidth + measureWidth > maxWidth) {
       systems.push(currentSystem)
       currentSystem = []
       currentWidth = 0
     }
 
-    const widthForSystem = getSystemMeasureWidth(currentSystem.length)
-    currentSystem.push({ measure, measureIndex, width: widthForSystem })
+    const widthForSystem =
+      noteAreaWidth + (currentSystem.length === 0 ? MEASURE_DECORATION_WIDTH : 0)
+    currentSystem.push({
+      bassNoteAreaWidth,
+      bassBeatUnits,
+      measure,
+      measureIndex,
+      noteAreaWidth,
+      trebleNoteAreaWidth,
+      trebleBeatUnits,
+      width: widthForSystem,
+    })
     currentWidth += widthForSystem
   })
 
