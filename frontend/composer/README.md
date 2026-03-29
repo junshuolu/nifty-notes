@@ -1,124 +1,239 @@
 # Nifty Notes
 
-Nifty Notes is a grand-staff piano composition prototype built with `React`, `Vite`, `TypeScript`, `VexFlow`, and `Tone.js`.
+`Nifty Notes` 是一个面向儿童音乐学习场景的双谱表钢琴作曲器原型。它强调“直接点五线谱就能写”，适合快速演示音符录入、节拍切换、和弦编辑、播放和课堂试用。
 
-The current product direction is "edit directly on the score". Users can insert notes and rests, build chords, add articulations, ornaments, dynamics, lyrics, key signatures, time signatures, tempo marks, ties, and slurs directly from the score view.
+## 当前功能
 
-## Current capabilities
+- 双谱表录入：高音谱号 + 低音谱号
+- 扩展音域：高音谱表可继续上探，低音谱表可继续下探
+- 音符与休止符录入
+- 两击式插入：第一击启动预插入，第二击真正落音
+- 默认空白谱面保持四分休止符骨架，小拍位只在实际插入后细分
+- `Dot` 附点功能
+- 临时记号：升号 ♯、降号 ♭、还原号 ♮（toggle 按钮）
+- 和弦输入：先选中已有音符，再点同拍位新音高可加音；`Shift + Click` 可从和弦里移除单音
+- 奏法记号：Staccato、Staccatissimo、Tenuto、Portato、Marcato、Accent
+- 装饰音：Trill、Turn、Inverted Turn、Mordent、Inverted Mordent
+- 力度记号：`pp`、`p`、`mp`、`mf`、`f`、`ff`、`sfz`
+- 歌词与文本：支持歌词、标题、副标题、Composer、Lyricist、Arranger
+- 调号切换：支持顶部工具区与谱面前导区直接修改
+- 拍号切换：支持 `4/4`、`3/4`、`2/4`、`6/8`、`7/8`、`9/8`
+- 自定义拍号：支持分子、分母和分组输入
+- 小节速度：支持 bar 级 tempo mark
+- `Tie` 与 `Slur`
+- Tempo 调整
+- Metronome 开关
+- 播放轨迹竖线
+- Tone.js 回放（含临时记号半音处理）
+- 内置示范曲谱：致爱丽丝（A主题，25小节）
+- 纯前端静态部署
 
-- Independent treble and bass staff editing
-- Whole, half, quarter, eighth, sixteenth, and dotted durations
-- Two-click note insertion flow: arm a rest slot first, then place the note
-- Chord editing on existing notes
-- Accidentals: natural, sharp, flat
-- Articulations: staccato, staccatissimo, tenuto, portato, marcato, accent
-- Ornaments: trill, turn, inverted turn, mordent, inverted mordent
-- Dynamics: `pp`, `p`, `mp`, `mf`, `f`, `ff`, `sfz`
-- Lyrics and score metadata editing
-- Global tempo plus per-bar tempo marks
-- Key signature picker in both the toolbar and the score-front area
-- Time signature presets plus custom meter input
-- Tie and slur support
-- Playback, metronome, and playhead
-- Built-in Fur Elise demo material
+## 本地启动
 
-## Meter grouping
-
-Time signatures are no longer treated as simple labels. The app now parses:
-
-- numerator
-- denominator
-- grouping
-- total subdivisions per measure
-
-This grouping affects:
-
-- how much content can fit inside a measure
-- placeholder rest splitting
-- eighth- and sixteenth-note beam grouping
-- explanatory help shown in the sidebar
-
-Default grouped meters currently include:
-
-- `6/8` -> `3+3`
-- `7/8` -> `2+2+3`
-- `9/8` -> `3+3+3`
-
-Custom grouping is also supported, for example `3+2+2`.
-
-## Local development
-
-Run the app from `frontend/composer`:
+进入 `frontend/composer` 后执行：
 
 ```bash
 npm install
 npm run dev
 ```
 
-Default local URL:
+默认本地地址通常是：
 
 ```text
 http://localhost:5173
 ```
 
-Production build:
+## 如何使用
+
+### 1. 选择 Note Value
+
+工具栏里可以先选择基础时值：
+
+- Whole
+- Half
+- Quarter
+- Eighth
+- Sixteenth
+
+如果要插入附点版本，再点一次 `Dot`。
+
+### 1.1 临时记号（Accidentals）
+
+工具栏 Accidentals 组有三个 toggle 按钮：
+
+- ♮ Natural（还原号）
+- ♯ Sharp（升号）
+- ♭ Flat（降号）
+
+点击一个按钮激活（高亮蓝色），再次点击取消。激活后插入的音符会自动带上对应记号，播放也按半音处理。
+
+切换 `Note Value` 后，不会把整小节 placeholder 预先改成对应时值：
+
+- 空白小节默认仍显示四分休止符骨架
+- 某一拍开始写更小时值后，只替换这一拍原来的四分休止符位置，不会整小节提前铺满
+- 只有实际插入到的那一拍 / 那一段，才会按真实节奏细分成八分、十六分等更小单位
+- 前后 bar 互不影响，不会因为去别的 bar 插入新音符而重新挤压
+- 每个 group / beat 会按真实密度自动扩宽，不再把密集音符硬塞进固定 bar 宽
+- 同一 measure 仍共享 barline，但高音谱表和低音谱表各自按自己的内容宽度排布，避免一个音部改动后把另一个音部的音符挤乱
+- 休止符会额外再向左一些，音符和蓝色悬停预览也继续约束在小节边界内，避免贴住或顶出 barline
+- 八分音符和十六分音符的点击吸附改成就近落位，连续填入时不需要刻意偏左点
+- `Half` 等较长时值的蓝色悬停预览会和真实插入位置保持一致
+
+### 1.2 当前占位符细分规则
+
+- 八分音符：当前正在编辑的拍位会先显示两个八分休止符槽位。
+- 十六分音符：当前正在编辑的拍位会先显示 `16th + 16th + 8th`。
+- 当这一拍已经写进十六分内容后，后面的八分休止符会继续拆成两个十六分休止符。
+- 上面的渐进细分只作用于当前鼠标所在或刚刚点击的那个 bar、那个 staff；前后 bar 和另一行谱表保持原来的占位骨架。
+- 八分和十六分拍位仍会自动扩宽，但比例已经重新收窄，目标是保持等距可读，而不是把单拍拉得过宽。
+
+### 2. 选择操作模式
+
+- `Insert Note`：插入音符
+- `Insert Rest`：插入休止符
+- `Tie`：给现有音符或和弦添加 / 取消 tie
+- `Slur`：为两个已选音符之间绘制长连线
+- `Erase`：删除当前位置的整个音符、和弦或休止符
+
+### 3. 在谱面中点击
+
+- `Insert Note` mode 下：
+  1. 鼠标滑过休止符位置时，该休止符自动变蓝高亮，下方出现蓝色水滴图标
+  2. 第一次点击只会启动预插入，不会立刻写入音符
+  3. 第二次点击才真正落音
+  4. 预览位置会跟随当前音高移动
+- 点击已有音符会优先选中该音符，避免误叠和弦
+- 选中某个音符后，再点同一拍位的新音高，可把音加入同一个和弦
+- `Shift + Click` 已有和弦里的某个音高，可把它从和弦里移除
+- `Insert Rest` 模式下，点击任意拍位会插入当前 Note Value 的休止符
+
+### 4. 切换 Time Signature
+
+可直接切换：
+
+- `4/4`
+- `3/4`
+- `2/4`
+- `6/8`
+- `7/8`
+- `9/8`
+
+也支持自定义输入：
+
+- Numerator
+- Denominator
+- Grouping，例如 `2+2+3`
+
+注意：
+
+- 切换拍号会保留 bar 数量
+- 能继续放进新小节长度里的音符和休止符会保留
+- 超出新拍号容量的内容会被移除
+- placeholder rest 和 beam grouping 会按新拍号分组重算
+
+### 4.1 分组拍号说明
+
+- `6/8` 默认按 `3+3`
+- `9/8` 默认按 `3+3+3`
+- `7/8` 默认按 `2+2+3`
+- 自定义拍号时，可手动输入其它分组，例如 `3+2+2`
+
+### 5. 调整 Key Signature
+
+可通过两种方式修改调号：
+
+- 顶部 `Measures` tab 里的 `Key Signature` 区域
+- 谱面前导区的小节起始处，直接点击调号
+
+注意：
+
+- 当前版本调号已经影响谱面显示与选择逻辑
+- 但不会自动重写已有音符的临时记号
+
+### 6. 调整 Tempo 和 Metronome
+
+点击右上角的 `Tempo xx BPM` 可打开设置面板：
+
+- 拖动滑块或直接输入 BPM
+- 打开或关闭 metronome
+
+如果要修改某个 bar 的速度：
+
+- 先选中 bar
+- 在 `Measures` tab 中设置 bar tempo
+- 谱面会在小节上方画出 `♩=xx` 形式的速度记号
+
+### 7. 播放与 Bar 管理
+
+- 点击 `Play` 播放当前谱面
+- 播放时会显示一条贯穿双谱表的竖向播放线
+- 点击 `Stop` 可停止播放
+- `+ Bar` 增加小节
+- `- Bar` 删除最后一个小节
+
+### 8. Articulations / Ornaments / Dynamics / Text
+
+- 先点击谱面里的已有音符完成选中
+- 再切换到对应 tab 应用记号
+- 左侧说明卡片会显示当前 tab 或当前符号的用途说明
+- `Text` tab 可用于歌词输入；标题、副标题和署名字段可直接在谱面上方编辑
+
+### 9. Demo 和 Clear
+
+- `🎹 Demo`：加载内置示范曲谱——致爱丽丝（A主题，25小节，3/4拍，72 BPM）
+- `Clear`：清空所有音符（保留小节数量）
+
+打开网站时默认已加载致爱丽丝，可直接点 Play 试听。
+
+## 构建
 
 ```bash
 npm run build
 ```
 
-Preview the build locally:
+构建输出目录：
+
+```text
+dist/
+```
+
+如需本地预览构建结果：
 
 ```bash
 npm run preview
 ```
 
-## Usage notes
+## 静态部署
 
-### Notes tab
+当前项目可以直接作为静态站点部署。当前线上做法是：
 
-- Choose duration, dot, and accidental first.
-- Hover a rest slot to reveal the blue droplet anchor.
-- First click arms insertion.
-- Second click places the note.
-- Clicking an existing note selects it instead of immediately stacking a chord.
+1. 本地构建：
 
-### Measures tab
+```bash
+npm run build
+```
 
-- Switch among preset time signatures.
-- Enter custom numerator, denominator, and grouping.
-- Edit key signature and time signature directly from the score-front area.
-- Set a tempo mark for the active bar.
+2. 上传 `dist/` 到服务器
 
-### Text tab
+3. 使用 `pm2` 托管静态目录，例如：
 
-- Apply lyrics to the selected note.
-- Edit title, subtitle, composer, lyricist, and arranger directly above the score.
+```bash
+pm2 serve /root/nifty-notes/dist 3001 --name nifty-notes --spa
+```
 
-### Articulations, ornaments, and dynamics
+## 关键文件
 
-- Select a note first.
-- Apply the chosen marking from the relevant tab.
-- The left sidebar updates with a short explanation of the selected symbol.
+- `src/App.tsx`：主界面、交互逻辑、VexFlow 渲染、播放控制、score-front 热点与弹框
+- `src/App.css`：页面样式、左侧固定栏、右侧滚动区、toolbar 与 popover 样式
+- `src/composer/constants.ts`：常量、类型、音域、拍号、调号、默认配置
+- `src/composer/score.ts`：音高映射、时值换算、分组拍号解析、吸附与播放片段生成
+- `src/composer/CursorPreview.tsx`：鼠标悬停预览
+- `src/composer/furElise.ts`：致爱丽丝示范曲谱数据
+- `project_review.md`：当前阶段的项目回顾
 
-## Interaction model
+## 已知限制
 
-- The left column is a fixed information sidebar.
-- The right column is the scrollable composition area.
-- Tempo marks are shown above the bar, not as note-level sliders.
-- Score-front popovers for key signature and time signature are aligned to their hotspots.
-
-## Project structure
-
-- `src/App.tsx`: main UI, interaction flow, score rendering, playback control
-- `src/App.css`: layout and interaction styling
-- `src/composer/constants.ts`: shared constants, types, pitch ranges, meter options
-- `src/composer/score.ts`: pitch mapping, meter parsing, grouping, layout, playback timing
-- `src/composer/furElise.ts`: built-in demo score data
-
-## Known limitations
-
-- Key signature currently controls selection and display, but does not yet rewrite existing accidentals automatically.
-- Slur support is currently limited to the same staff within the same system.
-- Irregular meters support custom grouping input, but common presets like `3+2+2` are not yet exposed as one-click buttons.
-- There is no persistence, export, account system, or backend storage yet.
+- 调号不会自动重写已有音符的临时记号
+- `Slur` 目前限制在同一 staff、同一系统内
+- `7/8` 等不规则拍号已支持自定义分组，但还没有做成快捷预设按钮
+- 没有保存、导出、账号系统或后端存储

@@ -2,55 +2,141 @@
 
 ## 2026-03-30
 
-### Meter and notation
+### 拍号与记谱
 
-- Added custom time signature input with numerator, denominator, and grouping.
-- Expanded preset meter support to `4/4`, `3/4`, `2/4`, `6/8`, `7/8`, and `9/8`.
-- Added grouped-meter parsing so placeholder rests and beam groups follow readable notation for compound and irregular meters.
-- Set `7/8` to default to `2+2+3`, while still allowing custom grouping input.
-- Fixed the odd-meter `IncompleteVoice` rendering failure by relaxing VexFlow voice strictness for the app-managed grid layout.
+- 新增自定义 `Time Signature` 输入，支持分子、分母和分组。
+- 预设拍号扩展为 `4/4`、`3/4`、`2/4`、`6/8`、`7/8`、`9/8`。
+- 新增分组拍号解析逻辑，`6/8`、`7/8`、`9/8` 的 placeholder rest 和 beam grouping 会按可读分组处理。
+- `7/8` 默认按 `2+2+3` 分组，同时支持手动输入自定义分组。
+- 修复 odd meter 切换时的 `IncompleteVoice` 渲染错误。
 
-### Score-front editing
+### score-front 交互
 
-- Added clickable score-front hotspots for key signature.
-- Added clickable score-front hotspots for time signature.
-- Aligned score-front popovers to the hotspot coordinate system instead of the old centered transform.
-- Unified toolbar and score-front meter/key editing flows.
+- 新增谱面前导区 `Key Signature` 热点。
+- 新增谱面前导区 `Time Signature` 热点。
+- 两个弹框改为按热点坐标定位，不再沿用旧的居中 transform 偏移方式。
+- 顶部 `Measures` tab 与谱面前导区弹框共用同一套调号、拍号编辑逻辑。
 
-### Editing workflow
+### 编辑体验
 
-- Kept the two-click note insertion model.
-- Restored and refined chord editing on selected notes.
-- Expanded the editable pitch range for treble and bass staves.
-- Added slur mode for long phrase curves.
-- Enabled note-level articulations, ornaments, dynamics, and lyrics from dedicated tabs.
+- 保留并稳定了两击式插入：第一击启动预插入，第二击真正落音。
+- 恢复并优化了和弦编辑逻辑。
+- 扩展了高音与低音谱表可编辑音域。
+- 新增 `Slur` 模式，支持长连线。
+- 选中音符后可从独立 tab 应用奏法记号、装饰音、力度记号和歌词。
 
-### UI and layout
+### UI 与布局
 
-- Reworked the top toolbar into `Notes`, `Articulations`, `Ornaments`, `Dynamics`, `Measures`, and `Text`.
-- Kept the left sidebar fixed while the score area scrolls independently.
-- Moved tempo editing to bar-level tempo marks above the staff.
-- Added an editable score header for title, subtitle, composer, lyricist, and arranger.
+- 顶部工具区改为 `Notes / Articulations / Ornaments / Dynamics / Measures / Text` 六个 tab。
+- 左侧改为固定说明与状态栏，右侧为独立滚动的作曲区域。
+- bar 速度改为显示在小节上方的 tempo mark，而不是音符上方 slider。
+- 谱面内新增可编辑标题区，包括标题、副标题、Composer、Lyricist、Arranger。
+
+### 文档更新
+
+- 在保留原有历史记录的前提下，补写本轮 `CHANGELOG.md`。
+- 修订 `README.md`，补充 grouped meter、score-front 编辑、两击式插入和新 toolbar 结构。
+- 修订 `project_review.md`，为后续 AI 补齐当前架构、文件职责、已完成功能与限制说明。
 
 ## 2026-03-29
 
-### Symbol editing
+### 记号与文本
 
-- Switched articulations, ornaments, and dynamics to icon-first tool rows.
-- Moved explanation text into the left sidebar help card.
-- Updated dynamic rendering to music-style glyphs instead of plain text styling.
+- 奏法记号、装饰音、力度记号从“图标+说明混排”改为纯图标工具区。
+- 左侧卡片统一展示当前 tab、当前符号或当前选中音符的说明。
+- 力度字形改为音乐字形而非普通文本字体。
+- 新增谱面标题区直接编辑标题、副标题与署名信息。
 
-### Insertion preview
+### 占位与预览
 
-- Replaced the old crosshair guide with a localized preview and droplet anchor.
-- Added whole-note and half-note placeholder behavior.
-- Fixed high and low insertion edge cases where preview positions could be shown but not inserted.
+- 悬停插入提示从旧的十字准线改为局部 note preview + 水滴锚点。
+- 全音符、二分音符也补齐了空位占位逻辑。
+- 修复高低音极限位置“能移动但插不进去”的命中问题。
+- 插入位置改为两击式，避免误插入和误叠和弦。
+
+### 小节与调号
+
+- 新增顶部 `Key Signature` 区域。
+- 新增 `Slur` 工具，并支持在同一系统内绘制长连线。
+- 新增谱面前导区调号、拍号弹框入口。
 
 ## 2026-03-28
 
-### Core interaction cleanup
+### 交互改进
 
-- Preserved empty-measure rest skeletons instead of over-expanding the whole bar when switching note values.
-- Improved hover and insertion alignment so preview and actual placement match.
-- Added clearer demo and clear flows for manual testing and classroom demos.
-- Improved dynamic spacing for denser rhythmic content.
+- 插入音符改为悬停加单击操作：鼠标滑过休止符时，该休止符自动高亮变蓝，同时下方出现蓝色水滴图标提示可在此处插入。
+- 直接点击即可在高亮位置插入音符，无需额外选择步骤。
+- 新增升号、降号、还原号三个临时记号按钮，点击可切换，再次点击取消。
+- 插入音符时如果选中了临时记号，音符上会显示对应符号，播放也会按半音处理。
+- 默认加载致爱丽丝（A主题）示范曲谱，用户一进入网站即可试听和编辑。
+- 新增 Demo 按钮（重新加载致爱丽丝）和 Clear 按钮（清空所有音符）。
+- 取消了旧的圆圈加 Insert here 浮层指示器，改用 VexFlow 原生样式直接让目标休止符变蓝高亮。
+
+### 性能修复
+
+- 对 `buildSystems`、`getMeasureSubdivisions` 和 `getBeatsPerMeasure` 使用 `useMemo` 进行缓存，避免每次渲染都重建 systems 数组导致 useEffect 反复触发。
+- 修复了之前连续操作后可能出现的页面卡死 / 无限重渲染问题。
+
+### 文档更新
+
+- 同步更新了 `CHANGELOG.md`、`README.md`、`project_review.md` 和 `project-handbook.local.md`。
+
+## 2026-03-27
+
+### 体验修复
+
+- 占位休止符回到默认四分骨架模型；切换 `Note Value` 不会把整小节预铺成八分 / 十六分，只有实际写入的那一拍才会逐步细分替换。
+- bar 与 bar 之间重新隔离，去前面的小节插入不同音值时，不会再把后面已经写过的密集小节重新挤乱。
+- 休止符再向左微调一档，实际音符与蓝色悬停预览继续保留 barline 边界约束，避免十六分音符贴住结束线。
+- measure 宽度改为按 beat 内真实节奏密度自动扩展，八分 / 十六分不再被硬塞进固定长度 bar。
+- 同一 measure 仍共用 barline，但高音谱表和低音谱表改为各自按自己的内容宽度排布，避免低音改动把高音重新挤乱。
+- 八分音符和十六分音符的点击吸附改成就近落位，连续输入时不必刻意点在偏左位置。
+- 统一悬停预览和真实符号的边界估算，修正 `Half` 等较长时值“预览位置和插入位置不一致”的问题。
+
+### 当前轮补充
+
+- 当前编辑拍位的 placeholder 细分规则补齐：`8th` 先显示两个八分休止符，`16th` 先显示 `16th + 16th + 8th`，只有这一拍真的写进十六分内容后才继续拆后半拍。
+- 八分 / 十六分的自动扩宽比例重新收窄，保持等距但不过分拉长单拍。
+- 当前 bar / 当前 staff 的 focus 单独生效；在低音部继续细分时，不再把高音部对应拍位的 placeholder 一起改乱。
+
+### 文档更新
+
+- 补充 `README.md` 中关于默认四分骨架、逐拍细分替换的使用说明。
+- 补充 `project_review.md` 中本轮占位休止符回退、动态 beat 宽度、staff 独立排布与预览对齐修复记录。
+
+## 2026-03-26
+
+### 体验修复
+
+- 休止符整体向左微调，读谱更自然，不再显得过分靠右。
+- 修正谱面点击映射，鼠标指向的音高与实际插入的音高保持一致。
+- 点击谱面插入音符时，先用即时预览音给反馈，同时后台继续加载钢琴采样，避免第一次点击出现明显延迟。
+
+### 新增功能
+
+- 顶部 `Tempo 80 BPM` 改为可点击设置面板，可直接调整速度。
+- 新增 metronome 开关，可在播放时打开或关闭节拍器。
+- 播放时新增贯穿高音谱表和低音谱表的竖向播放线，便于观察当前位置。
+
+### 文案统一
+
+- `Duration` 改为 `Note Value`
+- `Meter` 改为 `Time Signature`
+
+### 文档更新
+
+- 更新 `README.md`
+- 新增 `project_review.md`
+- 保留并补充本地工作说明 `project-handbook.local.md`
+
+## 2026-03-17
+
+### 首轮重构
+
+- 将原型统一改名为 `Nifty Notes`
+- 去掉旧的 `///` 品牌标记
+- 支持 `4/4`、`3/4`、`2/4`
+- 支持双谱表自然音范围 `C2-G5`
+- 支持和弦输入、和弦播放、tie 和附点
+- 默认空白谱面显示 rest 骨架
+- 前端静态部署流程跑通
