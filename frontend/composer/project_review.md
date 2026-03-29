@@ -1,164 +1,106 @@
 # Project Review
 
-## 当前项目状态
+## Current state
 
-`Nifty Notes` 目前是一个已经可部署、可演示、可基础试用的双谱表钢琴作曲器前端原型。
+Nifty Notes has moved beyond a simple note-clicking prototype and now behaves like a usable score-editing prototype for grand-staff piano notation.
 
-当前已经具备：
+The current build supports:
 
-- 双谱表点选录入（高音 + 低音谱号）
-- 和弦输入
-- 拍号切换（4/4、3/4、2/4）
-- 附点
-- 临时记号（升号 ♯、降号 ♭、还原号 ♮）
-- 默认空白谱面保持四分休止符骨架，只有实际写入的那一拍会继续细分
-- 鼠标悬停即高亮休止符 + 水滴图标提示，单击直接插入
-- 内置致爱丽丝示范曲谱（用户进入即可播放）
-- Demo / Clear 按钮
-- useMemo 性能缓存
-- 回放（含临时记号半音处理）
-- 静态部署
+- independent treble and bass staff editing
+- notes, rests, chords, dots, and accidentals
+- articulations, ornaments, dynamics, and lyrics
+- key signatures and grouped time signatures
+- per-bar tempo marks
+- ties and slurs
+- playback, metronome, and playhead
+- editable score title and credits
 
-线上演示地址：
+For demo, classroom, and prototype validation purposes, the product is now capable of a full "write, edit, switch meter, switch key, and play back" loop.
 
-```text
-http://8.210.93.101:3001
-```
+## Most important progress in this iteration
 
-客户原网站：
+### 1. Editing is now score-driven
 
-```text
-https://www.niftynotes.com.au/
-```
+The product no longer feels like a form with a score attached to it.
 
-## 技术架构
+Users can now:
 
-- **框架**: React + Vite (TypeScript)
-- **乐谱渲染**: VexFlow v4（SVG 方式）
-- **音频播放**: Tone.js（钢琴采样 + 即时预览音）
-- **数据模型**: `MeasureData[]`，每个 measure 包含独立的 `trebleItems` 和 `bassItems`
-- **布局**: 每个 beat 按实际节奏密度动态扩宽，高音低音谱表各自独立排布
-- **状态管理**: React useState，通过 `mutateMeasures` 统一变更
-- **性能**: `buildSystems` 等通过 `useMemo` 缓存，防止无限重渲染
+- arm insertion directly on rest slots
+- edit key signatures and time signatures from the score-front area
+- edit title and credit fields directly above the score
+- select notes first, then apply notation marks
 
-## 关键文件
+This is a much better foundation for a real notation editor.
 
-| 文件 | 职责 |
-|------|------|
-| `src/App.tsx` | 主界面、交互逻辑、VexFlow 渲染、播放控制 |
-| `src/App.css` | 页面样式 |
-| `src/composer/constants.ts` | 类型定义、常量、音域、拍号、默认配置 |
-| `src/composer/score.ts` | 音高映射、时值换算、吸附、播放片段、布局系统 |
-| `src/composer/CursorPreview.tsx` | 鼠标悬停音符预览 |
-| `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（25小节） |
+### 2. Time signatures now affect notation structure
 
-## 这一轮解决的问题
+Meters are now parsed as structured data rather than treated as plain strings.
 
-### 1. 休止符视觉位置
+The system now tracks:
 
-问题：
-- 休止符在每个 bar 里看起来偏右，读谱不自然
+- numerator
+- denominator
+- grouping
+- total subdivisions per measure
 
-处理：
-- 对休止符做了单独的横向偏移，让它在固定网格上略微向左
+That model now drives:
 
-### 2. 点击后声音延迟
+- placeholder rest splitting
+- beam grouping
+- measure width estimation
+- insertion capacity
+- playback timing
 
-问题：
-- 第一次点击音符时，钢琴采样加载导致预览音明显延迟
+As a result, meters such as `6/8`, `7/8`, and `9/8` now behave like grouped meters instead of just changing the label displayed on screen.
 
-处理：
-- 点击插入时先给一个即时预览音
-- 同时在后台继续加载钢琴采样
-- 之后正式播放仍然使用钢琴音色
+### 3. Score-front editing is now a first-class interaction
 
-### 3. 点到的音和落下的音不一致
+The score-front area is no longer passive engraving output.
 
-问题：
-- 客户反馈：点 `B4` 容易落成 `A4`
-- 鼠标悬停和实际插入不够直观
+It now supports:
 
-处理：
-- 修正高音谱表和低音谱表的顶部基准线映射
-- 现在谱面点击、预览标签、实际落点三者保持一致
+- clickable key signature selection
+- clickable time signature selection
+- popovers aligned to the score-front hotspots
 
-### 4. Tempo / Metronome
+This makes the score feel substantially closer to a professional notation workflow.
 
-处理：
-- 把右上角 Tempo 改成可点击的设置面板
-- 支持直接调 BPM
-- 支持 Metronome On / Off
+## Technical structure
 
-### 5. 播放轨迹不明显
+- Frontend stack: React + Vite + TypeScript
+- Score rendering: VexFlow SVG backend
+- Audio: Tone.js
+- Main data model: `MeasureData[]`
+- Separate staff data: `trebleItems` and `bassItems`
 
-处理：
-- 新增贯穿高音和低音谱表的竖向播放线
+Key implementation points for this round:
 
-### 6. 占位休止符不应该整小节预铺满
+- `parseTimeSignature(...)`
+- `getSubdivisionGroupInfo(...)`
+- group-based placeholder, layout, and beam calculation
+- VexFlow `Voice.Mode.SOFT` to prevent custom-meter transitions from crashing the page
 
-处理：
-- 占位休止符重新收回到默认四分骨架
-- 只有真正写入内容的那一拍才会继续细分替换
-- 每个 bar 的渲染互相隔离
+## Main issues already addressed
 
-### 7. 末尾十六分音符和 Half 预览对位
+- The left status area and right composition area are now separated cleanly.
+- The two-click insertion flow avoids accidental chord stacking.
+- Chord editing has been restored.
+- Extreme high and low pitch insertion ranges have been widened.
+- Dynamic markings now render more like music notation.
+- Tempo editing now produces bar-level tempo marks instead of note-level sliders.
+- Key signature and time signature are no longer toolbar-only actions.
 
-处理：
-- 按每个 beat 的真实节奏密度扩宽
-- 高音低音谱表各自独立排布
-- 悬停预览和真实符号统一边界估算
+## Remaining limitations
 
-### 8. 当前 beat 的占位休止符渐进细分
+- Key signature does not yet rewrite existing accidentals automatically.
+- Irregular meter grouping is editable, but common presets like `3+2+2` are not yet exposed as one-click options.
+- Slur support is still limited to the same staff and the same system.
+- There is still no persistence, export, collaboration layer, or backend.
+- Regression coverage is still mostly manual.
 
-处理：
-- `8th` 空拍位先显示两个八分休止符
-- `16th` 空拍位先显示 `16th + 16th + 8th`
-- 高音低音的 placeholder focus 分开处理
+## Recommended next steps
 
-### 9. 插入指示器改为悬停高亮加水滴图标
-
-问题：
-- 之前的圆圈加 Insert here 标签浮层视觉上不直观
-- 两步操作流程不符合直觉
-
-处理：
-- 改为鼠标悬停即高亮：滑过休止符时该休止符自动变蓝
-- 在高亮休止符下方显示蓝色水滴图标
-- 直接点击即可在高亮位置插入音符
-- 可以在任意位置自由插入
-
-### 10. useMemo 性能缓存
-
-处理：
-- 对 `buildSystems`、`getMeasureSubdivisions`、`getBeatsPerMeasure` 使用 `useMemo` 缓存
-- 消除了无意义的重渲染循环和页面卡死
-
-### 11. 临时记号（Accidentals）
-
-处理：
-- 新增升号 ♯、降号 ♭、还原号 ♮ 三个 toggle 按钮
-- `NoteItem` 新增 `accidentals` 字段存储每个音高的临时记号
-- VexFlow 渲染时通过 `Accidental` modifier 显示符号
-- Tone.js 播放时按半音正确处理
-- `createVisualNote` / `insertAtPosition` / `toTonePitch` / `getPitchLabel` 全链路支持
-
-### 12. 致爱丽丝示范曲谱
-
-处理：
-- 新增 `furElise.ts`，包含贝多芬致爱丽丝 A 主题 + B 段过渡共 25 小节
-- 原曲 3/8 拍用 3/4 拍等效编码（音值倍增），72 BPM
-- 高音部包含旋律（含 D♯、G♯ 临时记号），低音部包含和弦伴奏
-- 用户进入网站即默认加载，可直接 Play 试听
-- 新增 Demo 按钮（重新加载）和 Clear 按钮（清空所有音符）
-
-## 这一轮顺手统一的地方
-
-- `Duration` 改为 `Note Value`
-- `Meter` 改为 `Time Signature`
-
-## 目前仍然存在的限制
-
-- 暂时没有保存、导出和账号系统
-- 拍号切换仍然会清空现有谱面
-- 不支持 3/8、6/8 等复合拍号
-- 第一次完整播放如果钢琴采样尚未准备好，仍然可能先经历一次加载
+1. Add one-click grouping presets for irregular meters such as `7/8` and `5/8`.
+2. Connect key signature changes to existing accidental logic.
+3. Add stable regression coverage for slurs, ties, tempo marks, and custom meters.
+4. Evaluate MusicXML or PDF export.

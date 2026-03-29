@@ -71,7 +71,7 @@ function buildChordItems(notes: Array<{ pitches: string[]; d: '8' | 'q' | 'h'; s
 }
 
 function m(treble: ScoreItem[], bass: ScoreItem[]): MeasureData {
-  return { id: generateId(), trebleItems: treble, bassItems: bass }
+  return { id: generateId(), tempoBpm: null, trebleItems: treble, bassItems: bass }
 }
 
 /**

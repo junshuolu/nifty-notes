@@ -1,10 +1,32 @@
 export type BaseDuration = 'w' | 'h' | 'q' | '8' | '16'
 export type RenderDuration = BaseDuration | '32'
-export type EditMode = 'note' | 'rest' | 'tie' | 'erase'
+export type EditMode = 'note' | 'rest' | 'tie' | 'slur' | 'erase'
 export type NotePitch = string
 export type StaffId = 'treble' | 'bass'
-export type TimeSignature = '4/4' | '3/4' | '2/4'
+export type TimeSignature = string
+export type KeySignatureSpec =
+  | 'C'
+  | 'G'
+  | 'D'
+  | 'A'
+  | 'E'
+  | 'B'
+  | 'F#'
+  | 'C#'
+  | 'F'
+  | 'Bb'
+  | 'Eb'
+  | 'Ab'
+  | 'Db'
+  | 'Gb'
+  | 'Cb'
 export type AccidentalType = '#' | 'b' | 'n'
+export type ArticulationType = 'staccato' | 'staccatissimo' | 'tenuto' | 'portato' | 'marcato' | 'accent'
+export type OrnamentType = 'trill' | 'turn' | 'turnInverted' | 'mordent' | 'mordentInverted'
+export type DynamicType = 'ppp' | 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' | 'fff' | 'sfz' | 'fz' | 'fp' | 'pf'
+export type ToolbarTab = 'notes' | 'articulations' | 'ornaments' | 'dynamics' | 'bars' | 'text'
+
+export const MAX_UNDO_HISTORY = 50
 
 interface ScoreItemBase {
   id: string
@@ -12,12 +34,17 @@ interface ScoreItemBase {
   dots: 0 | 1
   start: number
   tieToNext?: boolean
+  tripletGroupId?: string
 }
 
 export interface NoteItem extends ScoreItemBase {
   kind: 'note'
   pitches: NotePitch[]
   accidentals?: Record<string, AccidentalType>
+  articulation?: ArticulationType
+  ornament?: OrnamentType
+  dynamic?: DynamicType
+  lyrics?: string
 }
 
 export interface RestItem extends ScoreItemBase {
@@ -29,6 +56,7 @@ export type ScoreItem = NoteItem | RestItem
 export interface MeasureData {
   bassItems: ScoreItem[]
   id: string
+  tempoBpm: number | null
   trebleItems: ScoreItem[]
 }
 
@@ -81,6 +109,16 @@ export const PLACEHOLDER_COLOR = '#c0cadc'
 export const ERASE_HOVER_COLOR = '#ef4444'
 
 export const TREBLE_PITCHES_FROM_TOP = [
+  'c/7',
+  'b/6',
+  'a/6',
+  'g/6',
+  'f/6',
+  'e/6',
+  'd/6',
+  'c/6',
+  'b/5',
+  'a/5',
   'g/5',
   'f/5',
   'e/5',
@@ -98,10 +136,16 @@ export const TREBLE_PITCHES_FROM_TOP = [
   'g/3',
   'f/3',
   'e/3',
+  'd/3',
+  'c/3',
 ] as const
-export const TREBLE_TOP_LINE_INDEX = 1
+export const TREBLE_TOP_LINE_INDEX = 11
 
 export const BASS_PITCHES_FROM_TOP = [
+  'g/4',
+  'f/4',
+  'e/4',
+  'd/4',
   'c/4',
   'b/3',
   'a/3',
@@ -117,8 +161,15 @@ export const BASS_PITCHES_FROM_TOP = [
   'e/2',
   'd/2',
   'c/2',
+  'b/1',
+  'a/1',
+  'g/1',
+  'f/1',
+  'e/1',
+  'd/1',
+  'c/1',
 ] as const
-export const BASS_TOP_LINE_INDEX = 2
+export const BASS_TOP_LINE_INDEX = 6
 
 export const BASE_DURATION_SUBDIVISIONS: Record<RenderDuration, number> = {
   '32': 1,
@@ -147,6 +198,9 @@ export const TIME_SIGNATURE_OPTIONS: TimeSignatureOption[] = [
   { beatsPerMeasure: 4, label: '4/4', value: '4/4' },
   { beatsPerMeasure: 3, label: '3/4', value: '3/4' },
   { beatsPerMeasure: 2, label: '2/4', value: '2/4' },
+  { beatsPerMeasure: 6, label: '6/8', value: '6/8' },
+  { beatsPerMeasure: 7, label: '7/8', value: '7/8' },
+  { beatsPerMeasure: 9, label: '9/8', value: '9/8' },
 ]
 
 export const PIANO_SAMPLE_URLS = {
@@ -203,6 +257,7 @@ export function createMeasure(id?: string): MeasureData {
   return {
     bassItems: [],
     id: id ?? generateId(),
+    tempoBpm: null,
     trebleItems: [],
   }
 }
