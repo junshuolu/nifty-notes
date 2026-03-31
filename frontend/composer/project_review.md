@@ -59,7 +59,43 @@ https://www.niftynotes.com.au/
 | `src/composer/CursorPreview.tsx` | 鼠标悬停音符预览 |
 | `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（25小节） |
 
-## 这一轮解决的问题
+## 近期大规模变更 (2026-03-31)
+
+### 1. 全局直角 UI
+- **问题**：旧版 UI 包含大量的圆角 (`border-radius`)。
+- **处理**：移除了 `App.css` 中所有容器、按钮、卡片的 `border-radius`，实现全盘方角（Square Corners），使设计语言更硬朗现代。
+
+### 2. 休止符细分与动态拆分逻辑
+- **问题**：空小节没有正确默认四分休止符；而且插入十六分音符时，休止符占位拆分不够智能。
+- **处理**：
+  - 默认空拍显示（例如 4/4 拍）由 2 个八分休止符改成 1 个四分休止符 (`getGroupPlaceholderLength`)。
+  - 通过二分递归式的按位对齐算法 (`getFocusedPlaceholderLength`)，实现了焦点在空拍位时，悬停 16 分音符自动显示 `16th, 16th, 8th`（即两个十六分加一个八分）的经典休止划分。插入前两个 16 分音符后，剩余的 8 分休止符会自动根据新焦点进一步拆分为两个 16 分休止符。
+  
+### 3. Dynamics 渲染位置贴近五线谱
+- **处理**：调整了 `VexFlow` 的 `Annotation` 偏移，`setYShift` 由 `-6` 改为 `-24`，从而让 `p`、`mf` 等力度记号更加紧贴五线谱底部。
+  
+### 4. 取消全局 Key Signature (调号)
+- **问题**：全局切换调号存在复杂的逻辑映射与音符显示冲突，用户更倾向于使用局部的临时升降号进行创作。
+- **处理**：彻底移除了 `scoreFrontHotspots` 中负责渲染Key Signature的部分。移除了包含升降还原号逻辑的 `Bars` Tab快捷按钮，并在 `buildSystems` 的渲染流程中移除了 `addKeySignature` 步骤。
+
+### 5. 十六分音符插入位置的视觉对齐 (Preview X-Offset)
+- **问题**：在原有的插入预览机制中，十六分音符/休止符因为宽度极小，视觉上中心对齐时感觉总是"偏右"，导致点击命中不明确。
+- **处理**：我们在 `clampPreviewX` 中针对密集音符 (`16n`, `32n`) 硬编码了 `-6px` 的 X轴向左偏移 (`const IS_DENSE = ['16n', '32n'].includes(...)`)，使其预览标记严格对齐在休止符的**最左侧缘**，提升了目标对齐的直观性。
+
+### 6. Time Signature Popover 布局拓展
+- **问题**："Apply Meter" 按钮因为原设计宽度 (`392px`) 较窄，且包含多个表单组件导致界面拥挤，部分元素甚至被切割。
+- **处理**：在 `App.css` 中将 `.score-front-popover--time` 的 `width` 放大至 `480px` 解决溢出。
+### 5. 和弦级悬停预览 (Chord Pre-Insert Preview)
+- **问题**：在原逻辑中，用户点击空白处的休止符时，有半透明悬停预览（`PendingInsertIndicator`）。但在为现有音符添加和弦音时（选中音符然后上下移动鼠标），没有直观的视觉反馈。
+- **处理**：在 `App.tsx` 的 `handleScoreMouseMove` 中，如果鼠标下方的目标音符正是当前激活的 `activeItemId`，则计算出它的 `previewY` 并更新到新状态 `chordHoverPreview` 中。渲染侧利用现有的 `PendingInsertIndicator` 组件，实现了与初次落键相同质感的水滴虚影预显体验。
+
+### 6. 十六分音符动态横向拓宽 (Contextual Measure Expansion)
+- **问题**：十六分音符堆叠时小节宽度不够，音符紧凑，用户点击极度困难且容易误操作。
+- **处理**：重构了 `score.ts` 中的 `SIXTEENTH_VISUAL_UNITS_PER_BEAT` 权重（从 `3.5` 拔高到 `5.0`）。现在一旦探测到节拍内存在 16 分或更短的音符，该小节的宽度分配池将被立刻成倍放大，确保 16 分音符有极佳的点击呼吸感。
+
+### 7. Gallery 排版优化
+- **处理**：彻底重排了 `.gallery-grid`，使用 24px 列间距并加入了微积分式的悬停投影缓动动画，避免了剩余卡片挤作一团。
+## 历史轮次解决的问题
 
 ### 1. 休止符视觉位置
 
@@ -238,3 +274,100 @@ https://www.niftynotes.com.au/
 - `Slur` 目前限制在同一 staff、同一系统内
 - `7/8` 等不规则拍号已支持自定义分组，但还没有做成快捷预设按钮
 - 第一次完整播放如果钢琴采样尚未准备好，仍然可能先经历一次加载
+
+## Session 2 新增工作
+
+### 21. MXL (MusicXML) → TypeScript 自动转换管线
+
+问题：
+- 此前的 demo 曲谱是凭记忆手写的，音符准确度有限
+- PDF 格式的乐谱无法被 AI 直接读取
+
+处理：
+- 编写了 `mxl_convert.js` Node.js 脚本
+- 从 MXL (ZIP 包含 MusicXML) 文件中自动解析全部音符数据
+- 支持的 MusicXML 元素：`pitch`、`alter`、`accidental`、`chord`、`rest`、`dot`、`tie`、`staccato`、`divisions`、`backup`、`forward`
+- 一键转换为符合 `MeasureData[]` 类型的 TypeScript 文件
+- 保留调号 (`fifths`)、拍号 (`beats/beat-type`)、速度 (`metronome/per-minute`) 等元数据
+
+工作流：
+1. 用 MuseScore 打开谱子 → 导出 `.mxl`
+2. 放入 `frontend/Piano sheet music/`
+3. 运行 `node mxl_convert.js`
+4. 在 `App.tsx` gallery 数组中添加 entry
+
+### 22. 🎹 Gallery tab（钢琴名曲库）
+
+处理：
+- 新增 `Gallery` tab，在 toolbar 中显示 9 张 demo 卡片
+- 每张卡片展示：标题、副标题、作曲家、拍号、BPM、调号
+- 点击即加载完整乐谱到编辑器，自动设置所有元数据
+- 加载后自动切换到 Notes tab
+
+已精确转换的 9 首曲目：
+
+| 曲目 | 小节数 | 拍号 | BPM | 调号 |
+|------|--------|------|-----|------|
+| Für Elise | 104 | 3/8 | 120 | C |
+| Turkish March | 51 | 2/4 | 130 | C |
+| Rain and Your | 37 | 4/4 | 70 | C |
+| Summer | 58 | 4/4 | 90 | D |
+| Croatian Rhapsody | 97 | 4/4 | 120 | Eb |
+| Mariage d'Amour | 83 | 4/4 | 72 | Bb |
+| Souvenirs D'Enfance | 57 | 10/8 | 120 | G |
+| Annie's Wonderland | 65 | 4/4 | 101 | F# |
+| Carrying You | 82 | 4/4 | 83 | C |
+
+### 23. Toolbar 简化
+
+处理：
+- `Measures` tab 的 **Time Signature** 精简为 `4/4`、`3/4`、`2/4` 三个快捷按钮
+- `Measures` tab 的 **Key Signature** 精简为 `♭`、`♮`、`♯` 三个按钮
+- 两处均增加"More: click on staff ↓"提示，引导用户通过谱面前导区弹框获取更多选项
+- 减少信息堆积，顶部更清爽
+
+### 24. Slur 渲染修复
+
+问题：
+- 高音谱表上的连音线和五线谱以及音符重叠
+
+处理：
+- 高音谱表连音线改为在谱表上方弧形绘制（`yShift: -30`, 控制点 `y: -40`）
+- 低音谱表连音线保持在下方
+
+### 25. 休止符默认显示优化
+
+问题：
+- 空拍位默认显示一个四分休止符，视觉上不够细致
+
+处理：
+- 空拍位改为默认显示两个八分休止符
+- 修正 `getPlaceholderDurationForLength` 中条件判断顺序
+
+### 26. 小节宽度增加
+
+处理：
+- `SYSTEM_MEASURE_WIDTH` 从 182px 增加至 220px
+- 改善十六分音符密集排列时的间距和点击目标大小
+
+## 关键文件（更新）
+
+| 文件 | 职责 |
+|------|------|
+| `src/App.tsx` | 主界面、交互逻辑、toolbar tabs、score-front 热点、VexFlow 渲染、播放控制、Gallery |
+| `src/App.css` | 页面样式、左侧固定栏、右侧滚动区、toolbar、popover、gallery card 样式 |
+| `src/composer/constants.ts` | 类型定义、常量、音域、拍号、调号、默认配置 |
+| `src/composer/score.ts` | 音高映射、时值换算、吸附、播放片段、拍号分组、布局系统 |
+| `src/composer/CursorPreview.tsx` | 鼠标悬停音符预览 |
+| `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（旧版手写 25 小节） |
+| `src/composer/demos/` | MXL 精确导入的 9 首钢琴名曲 demo 数据 |
+| `src/composer/demos/turkish.ts` | Turkish March（51 小节，2/4，130 BPM） |
+| `src/composer/demos/rain.ts` | Rain and Your（37 小节，4/4，70 BPM） |
+| `src/composer/demos/summer.ts` | Summer（58 小节，4/4，90 BPM） |
+| `src/composer/demos/croatian.ts` | Croatian Rhapsody（97 小节，4/4，120 BPM） |
+| `src/composer/demos/wedding.ts` | Mariage d'Amour（83 小节，4/4，72 BPM） |
+| `src/composer/demos/souvenirs.ts` | Souvenirs D'Enfance（57 小节，10/8，120 BPM） |
+| `src/composer/demos/annies.ts` | Annie's Wonderland（65 小节，4/4，101 BPM） |
+| `src/composer/demos/carrying.ts` | Carrying You（82 小节，4/4，83 BPM） |
+| `src/composer/demos/furElise_new.ts` | Für Elise — MXL 精确版（104 小节，3/8，120 BPM） |
+

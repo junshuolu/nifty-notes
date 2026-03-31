@@ -8,15 +8,15 @@
 - 扩展音域：高音谱表可继续上探，低音谱表可继续下探
 - 音符与休止符录入
 - 两击式插入：第一击启动预插入，第二击真正落音
-- 默认空白谱面保持四分休止符骨架，小拍位只在实际插入后细分
+- 默认空白谱面保持四分休止符骨架，小拍位只在实际对应落点悬停或插入后动态细分
 - `Dot` 附点功能
 - 临时记号：升号 ♯、降号 ♭、还原号 ♮（toggle 按钮）
-- 和弦输入：先选中已有音符，再点同拍位新音高可加音；`Shift + Click` 可从和弦里移除单音
+- 和弦输入：选中已有音符，**同拍位悬停出现半透明和弦水滴预显**，点击即可加音；`Shift + Click` 可移除
+- 动态小节间距：当小节内录入高密度音符（例如十六分、三十二分音符）时，小节横向宽度自适应成倍放大，确保点选精准
 - 奏法记号：Staccato、Staccatissimo、Tenuto、Portato、Marcato、Accent
 - 装饰音：Trill、Turn、Inverted Turn、Mordent、Inverted Mordent
 - 力度记号：`pp`、`p`、`mp`、`mf`、`f`、`ff`、`sfz`
 - 歌词与文本：支持歌词、标题、副标题、Composer、Lyricist、Arranger
-- 调号切换：支持顶部工具区与谱面前导区直接修改
 - 拍号切换：支持 `4/4`、`3/4`、`2/4`、`6/8`、`7/8`、`9/8`
 - 自定义拍号：支持分子、分母和分组输入
 - 小节速度：支持 bar 级 tempo mark
@@ -25,8 +25,11 @@
 - Metronome 开关
 - 播放轨迹竖线
 - Tone.js 回放（含临时记号半音处理）
-- 内置示范曲谱：致爱丽丝（A主题，25小节）
+- 内置 2 首钢琴名曲 demo（Gallery tab），从 MusicXML 精确导入
+- 🎹 Gallery 一键加载完整乐谱
+- MXL (MusicXML) → TypeScript 自动转换管线
 - 纯前端静态部署
+- 全局采用硬朗现代的无圆角（Square Corners）设计原则
 
 ## 本地启动
 
@@ -81,11 +84,11 @@ http://localhost:5173
 
 ### 1.2 当前占位符细分规则
 
-- 八分音符：当前正在编辑的拍位会先显示两个八分休止符槽位。
-- 十六分音符：当前正在编辑的拍位会先显示 `16th + 16th + 8th`。
-- 当这一拍已经写进十六分内容后，后面的八分休止符会继续拆成两个十六分休止符。
-- 上面的渐进细分只作用于当前鼠标所在或刚刚点击的那个 bar、那个 staff；前后 bar 和另一行谱表保持原来的占位骨架。
-- 八分和十六分拍位仍会自动扩宽，但比例已经重新收窄，目标是保持等距可读，而不是把单拍拉得过宽。
+- 默认状态：每个空白 4/4 小节填充四个四分休止符。
+- 八分音符：悬停空拍位置时，当前拍位会先拆分为两个八分休止符骨架。
+- 十六分音符：悬停空拍位置时，当前拍位会呈现经典二分拆分（如 `16th休止符 + 16th休止符 + 8th休止符` 或 `8th休止符 + 16th休止符 + 16th休止符`，取决于悬停在前半拍还是后半拍）。
+- 动态演进：随着十六分内容插入，原先未拆分的八分休止符会自动根据新焦点进一步细分为两个十六分休止符。
+- 渐进细分只作用于当前鼠标焦点所在的局部区域，前后拍与另一谱表保持原占位骨架，避免视觉过度碎片化。
 
 ### 2. 选择操作模式
 
@@ -109,16 +112,11 @@ http://localhost:5173
 
 ### 4. 切换 Time Signature
 
-可直接切换：
+顶部 `Measures` tab 提供 `4/4`、`3/4`、`2/4` 三个快捷预设。
 
-- `4/4`
-- `3/4`
-- `2/4`
-- `6/8`
-- `7/8`
-- `9/8`
+更多选项（包括 `6/8`、`7/8`、`9/8` 及自定义拍号）可通过点击谱面前导区的拍号弹框选择。
 
-也支持自定义输入：
+自定义输入支持：
 
 - Numerator
 - Denominator
@@ -138,19 +136,7 @@ http://localhost:5173
 - `7/8` 默认按 `2+2+3`
 - 自定义拍号时，可手动输入其它分组，例如 `3+2+2`
 
-### 5. 调整 Key Signature
-
-可通过两种方式修改调号：
-
-- 顶部 `Measures` tab 里的 `Key Signature` 区域
-- 谱面前导区的小节起始处，直接点击调号
-
-注意：
-
-- 当前版本调号已经影响谱面显示与选择逻辑
-- 但不会自动重写已有音符的临时记号
-
-### 6. 调整 Tempo 和 Metronome
+### 5. 调整 Tempo 和 Metronome
 
 点击右上角的 `Tempo xx BPM` 可打开设置面板：
 
@@ -178,12 +164,37 @@ http://localhost:5173
 - 左侧说明卡片会显示当前 tab 或当前符号的用途说明
 - `Text` tab 可用于歌词输入；标题、副标题和署名字段可直接在谱面上方编辑
 
-### 9. Demo 和 Clear
+### 9. 🎹 Gallery（钢琴名曲库）
 
-- `🎹 Demo`：加载内置示范曲谱——致爱丽丝（A主题，25小节，3/4拍，72 BPM）
+点击工具栏的 `Gallery` tab，可以看到 9 首从 MusicXML 精确导入的钢琴名曲卡片：
+
+| 曲目 | 作曲家 | 拍号 | BPM | 调号 |
+|------|--------|------|-----|------|
+| Für Elise | Beethoven | 3/8 | 120 | C |
+| Turkish March | Mozart | 2/4 | 130 | C |
+| Rain and Your | Yiruma | 4/4 | 70 | C |
+| Summer | Joe Hisaishi | 4/4 | 90 | D |
+| Croatian Rhapsody | Maksim Mrvica | 4/4 | 120 | Eb |
+| Mariage d'Amour | Paul de Senneville | 4/4 | 72 | Bb |
+| Souvenirs D'Enfance | Richard Clayderman | 10/8 | 120 | G |
+| Annie's Wonderland | Yanni | 4/4 | 101 | F# |
+| Carrying You | Joe Hisaishi | 4/4 | 83 | C |
+
+点击任意卡片即可一键加载完整乐谱，自动设置标题、副标题、Composer、调号、拍号和 BPM，然后自动切换到 Notes tab 供用户编辑。
+
+### 10. Demo 和 Clear
+
+- `🎹 Demo`：加载内置示范曲谱——致爱丽丝
 - `Clear`：清空所有音符（保留小节数量）
 
 打开网站时默认已加载致爱丽丝，可直接点 Play 试听。
+
+### 11. 添加新 demo 曲目
+
+1. 用 MuseScore 打开钢琴谱 → 导出为 `.mxl`
+2. 将 `.mxl` 文件放入 `frontend/Piano sheet music/`
+3. 运行 `node mxl_convert.js` 自动生成 TypeScript demo 文件
+4. 在 `App.tsx` 的 gallery 数组中新增一个卡片 entry
 
 ## 构建
 
@@ -223,17 +234,19 @@ pm2 serve /root/nifty-notes/dist 3001 --name nifty-notes --spa
 
 ## 关键文件
 
-- `src/App.tsx`：主界面、交互逻辑、VexFlow 渲染、播放控制、score-front 热点与弹框
-- `src/App.css`：页面样式、左侧固定栏、右侧滚动区、toolbar 与 popover 样式
-- `src/composer/constants.ts`：常量、类型、音域、拍号、调号、默认配置
-- `src/composer/score.ts`：音高映射、时值换算、分组拍号解析、吸附与播放片段生成
-- `src/composer/CursorPreview.tsx`：鼠标悬停预览
-- `src/composer/furElise.ts`：致爱丽丝示范曲谱数据
-- `project_review.md`：当前阶段的项目回顾
+| 文件 | 职责 |
+|------|------|
+| `src/App.tsx` | 主界面、交互逻辑、VexFlow 渲染、播放控制、score-front 热点与弹框、Gallery |
+| `src/App.css` | 页面样式、左侧固定栏、右侧滚动区、toolbar、popover、gallery card 样式 |
+| `src/composer/constants.ts` | 常量、类型、音域、拍号、调号、默认配置 |
+| `src/composer/score.ts` | 音高映射、时值换算、分组拍号解析、吸附与播放片段生成 |
+| `src/composer/CursorPreview.tsx` | 鼠标悬停预览 |
+| `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（旧版手写 25 小节） |
+| `src/composer/demos/` | MXL 精确导入的 9 首钢琴名曲 demo 数据 |
+| `project_review.md` | 当前阶段的项目回顾 |
 
 ## 已知限制
 
-- 调号不会自动重写已有音符的临时记号
 - `Slur` 目前限制在同一 staff、同一系统内
 - `7/8` 等不规则拍号已支持自定义分组，但还没有做成快捷预设按钮
 - 没有保存、导出、账号系统或后端存储
