@@ -10,7 +10,6 @@ import {
   SYSTEM_MEASURE_WIDTH,
   SYSTEM_SIDE_PADDING,
   SYSTEM_WRAP_WIDTH,
-  TIME_SIGNATURE_OPTIONS,
   TREBLE_TOP_LINE_INDEX,
   TREBLE_PITCHES_FROM_TOP,
   type AccidentalType,
@@ -25,6 +24,140 @@ import {
   type TimeSignature,
 } from './constants'
 
+export interface MeasureTempoTiming {
+  bpm: number
+  durationSeconds: number
+  measureIndex: number
+  startSeconds: number
+  subdivisionSeconds: number
+}
+
+export interface ParsedTimeSignature {
+  denominator: 2 | 4 | 8 | 16
+  display: TimeSignature
+  groupSubdivisionLengths: number[]
+  grouping: number[]
+  numerator: number
+  subdivisionsPerMeasure: number
+}
+
+const WHOLE_NOTE_SUBDIVISIONS = BASE_DURATION_SUBDIVISIONS.w
+const SUPPORTED_TIME_SIGNATURE_DENOMINATORS = new Set([2, 4, 8, 16])
+
+function getDefaultGrouping(
+  numerator: number,
+  denominator: number,
+) {
+  if (denominator === 8 && numerator > 3) {
+    if (numerator % 3 === 0) {
+      return Array.from({ length: numerator / 3 }, () => 3)
+    }
+
+    if (numerator === 5) {
+      return [2, 3]
+    }
+
+    if (numerator === 7) {
+      return [2, 2, 3]
+    }
+
+    const groups: number[] = []
+    let remaining = numerator
+
+    while (remaining > 0) {
+      if (remaining === 3) {
+        groups.push(3)
+        break
+      }
+
+      if (remaining === 4) {
+        groups.push(2, 2)
+        break
+      }
+
+      groups.push(2)
+      remaining -= 2
+    }
+
+    return groups
+  }
+
+  return Array.from({ length: numerator }, () => 1)
+}
+
+function normalizeGrouping(
+  numerator: number,
+  denominator: number,
+  groupingOverride?: number[] | null,
+) {
+  if (
+    groupingOverride &&
+    groupingOverride.length > 0 &&
+    groupingOverride.every((value) => Number.isInteger(value) && value > 0) &&
+    groupingOverride.reduce((sum, value) => sum + value, 0) === numerator
+  ) {
+    return groupingOverride
+  }
+
+  return getDefaultGrouping(numerator, denominator)
+}
+
+export function parseTimeSignature(
+  timeSignature: TimeSignature,
+  groupingOverride?: number[] | null,
+): ParsedTimeSignature {
+  const match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(timeSignature)
+  const numerator = Math.max(1, Number(match?.[1] ?? 4))
+  const parsedDenominator = Number(match?.[2] ?? 4)
+  const denominator = (
+    SUPPORTED_TIME_SIGNATURE_DENOMINATORS.has(parsedDenominator)
+      ? parsedDenominator
+      : 4
+  ) as 2 | 4 | 8 | 16
+  const grouping = normalizeGrouping(numerator, denominator, groupingOverride)
+  const subdivisionUnit = WHOLE_NOTE_SUBDIVISIONS / denominator
+  const groupSubdivisionLengths = grouping.map((value) => value * subdivisionUnit)
+  const display = `${numerator}/${denominator}`
+
+  return {
+    denominator,
+    display,
+    groupSubdivisionLengths,
+    grouping,
+    numerator,
+    subdivisionsPerMeasure: groupSubdivisionLengths.reduce((sum, value) => sum + value, 0),
+  }
+}
+
+export function getSubdivisionGroupInfo(
+  subdivision: number,
+  groupSubdivisionLengths: number[],
+) {
+  let start = 0
+
+  for (let index = 0; index < groupSubdivisionLengths.length; index += 1) {
+    const length = groupSubdivisionLengths[index] ?? 0
+    const end = start + length
+
+    if (subdivision < end) {
+      return {
+        index,
+        length,
+        start,
+      }
+    }
+
+    start = end
+  }
+
+  const lastLength = groupSubdivisionLengths[groupSubdivisionLengths.length - 1] ?? 0
+  return {
+    index: Math.max(groupSubdivisionLengths.length - 1, 0),
+    length: lastLength,
+    start: Math.max(start - lastLength, 0),
+  }
+}
+
 export function getItemsForStaff(
   measure: MeasureData,
   staffId: StaffId,
@@ -33,14 +166,11 @@ export function getItemsForStaff(
 }
 
 export function getBeatsPerMeasure(timeSignature: TimeSignature): number {
-  return (
-    TIME_SIGNATURE_OPTIONS.find((option) => option.value === timeSignature)
-      ?.beatsPerMeasure ?? 4
-  )
+  return parseTimeSignature(timeSignature).numerator
 }
 
 export function getMeasureSubdivisions(timeSignature: TimeSignature): number {
-  return getBeatsPerMeasure(timeSignature) * SUBDIVISIONS_PER_BEAT
+  return parseTimeSignature(timeSignature).subdivisionsPerMeasure
 }
 
 export function canUseDot(_: BaseDuration): boolean {
@@ -97,12 +227,52 @@ export function cloneMeasures(measures: MeasureData[]): MeasureData[] {
         : { ...item },
     ),
     id: measure.id,
+    tempoBpm: measure.tempoBpm,
     trebleItems: measure.trebleItems.map((item) =>
       item.kind === 'note'
         ? { ...item, pitches: [...item.pitches], accidentals: item.accidentals ? { ...item.accidentals } : undefined }
         : { ...item },
     ),
   }))
+}
+
+export function getEffectiveMeasureTempo(
+  measures: MeasureData[],
+  measureIndex: number,
+  defaultBpm: number,
+): number {
+  let effectiveBpm = defaultBpm
+
+  for (let index = 0; index <= measureIndex && index < measures.length; index += 1) {
+    effectiveBpm = measures[index]?.tempoBpm ?? effectiveBpm
+  }
+
+  return effectiveBpm
+}
+
+export function getMeasureTempoTimeline(
+  measures: MeasureData[],
+  timeSignature: TimeSignature,
+  defaultBpm: number,
+): MeasureTempoTiming[] {
+  const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
+  let startSeconds = 0
+
+  return measures.map((_, measureIndex) => {
+    const bpm = getEffectiveMeasureTempo(measures, measureIndex, defaultBpm)
+    const subdivisionSeconds = getSubdivisionSeconds(bpm)
+    const durationSeconds = subdivisionsPerMeasure * subdivisionSeconds
+    const timing = {
+      bpm,
+      durationSeconds,
+      measureIndex,
+      startSeconds,
+      subdivisionSeconds,
+    }
+
+    startSeconds += durationSeconds
+    return timing
+  })
 }
 
 export function itemEnd(item: ScoreItem): number {
@@ -229,9 +399,9 @@ export function normalizeMeasures(
 export function buildPlaybackNotes(
   measures: MeasureData[],
   timeSignature: TimeSignature,
-  bpm: number,
+  defaultBpm: number,
 ) {
-  const subdivisionSeconds = getSubdivisionSeconds(bpm)
+  const measureTimings = getMeasureTempoTimeline(measures, timeSignature, defaultBpm)
   const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
   const segments: Array<{
     durationSeconds: number
@@ -247,7 +417,10 @@ export function buildPlaybackNotes(
           return
         }
 
-        let totalSubdivisions = getItemSubdivisions(item)
+        let totalDurationSeconds =
+          getItemSubdivisions(item) *
+          (measureTimings[measureIndex]?.subdivisionSeconds ??
+            getSubdivisionSeconds(defaultBpm))
         let currentMeasureIndex = measureIndex
         let currentItem = item
 
@@ -270,17 +443,23 @@ export function buildPlaybackNotes(
             break
           }
 
-          totalSubdivisions += getItemSubdivisions(next.item)
+          totalDurationSeconds +=
+            getItemSubdivisions(next.item) *
+            (measureTimings[next.measureIndex]?.subdivisionSeconds ??
+              getSubdivisionSeconds(defaultBpm))
           currentMeasureIndex = next.measureIndex
           currentItem = next.item
           visited.add(next.item.id)
         }
 
         segments.push({
-          durationSeconds: totalSubdivisions * subdivisionSeconds,
+          durationSeconds: totalDurationSeconds,
           notes: item.pitches.map((p) => toTonePitch(p, item.accidentals?.[p])),
           startSeconds:
-            (measureIndex * subdivisionsPerMeasure + item.start) * subdivisionSeconds,
+            (measureTimings[measureIndex]?.startSeconds ?? 0) +
+            item.start *
+              (measureTimings[measureIndex]?.subdivisionSeconds ??
+                getSubdivisionSeconds(defaultBpm)),
         })
       })
     })
@@ -373,13 +552,14 @@ const VISUAL_UNIT_WIDTH = SYSTEM_MEASURE_WIDTH / (4 * VISUAL_UNITS_PER_BEAT)
 
 function getSmallestBeatItemLength(
   items: ScoreItem[],
-  beatStart: number,
+  groupStart: number,
+  groupLength: number,
 ): number | null {
-  const beatEnd = beatStart + SUBDIVISIONS_PER_BEAT
+  const groupEnd = groupStart + groupLength
   let smallestLength: number | null = null
 
   items.forEach((item) => {
-    if (item.start >= beatEnd || itemEnd(item) <= beatStart) {
+    if (item.start >= groupEnd || itemEnd(item) <= groupStart) {
       return
     }
 
@@ -395,10 +575,10 @@ function getSmallestBeatItemLength(
 
 function getBeatVisualUnitsForItems(
   items: ScoreItem[],
-  beatIndex: number,
+  groupStart: number,
+  groupLength: number,
 ): number {
-  const beatStart = beatIndex * SUBDIVISIONS_PER_BEAT
-  const smallestLength = getSmallestBeatItemLength(items, beatStart)
+  const smallestLength = getSmallestBeatItemLength(items, groupStart, groupLength)
 
   if (smallestLength === null || smallestLength >= 8) {
     return VISUAL_UNITS_PER_BEAT
@@ -429,87 +609,94 @@ function getFocusedBeatVisualUnits(
   return VISUAL_UNITS_PER_BEAT
 }
 
-function getStaffBeatVisualUnits(
+function getStaffGroupVisualUnits(
   items: ScoreItem[],
-  beatsPerMeasure: number,
-  focusedBeatStart: number | null,
+  groupSubdivisionLengths: number[],
+  focusedGroupStart: number | null,
   focusedBaseDuration: BaseDuration | null,
 ) {
-  return Array.from({ length: beatsPerMeasure }, (_, beatIndex) =>
-    Math.max(
-      getBeatVisualUnitsForItems(items, beatIndex),
-      focusedBeatStart === beatIndex * SUBDIVISIONS_PER_BEAT &&
-      focusedBaseDuration !== null
+  let groupStart = 0
+
+  return groupSubdivisionLengths.map((groupLength) => {
+    const units = Math.max(
+      getBeatVisualUnitsForItems(items, groupStart, groupLength),
+      focusedGroupStart === groupStart && focusedBaseDuration !== null
         ? getFocusedBeatVisualUnits(focusedBaseDuration)
         : VISUAL_UNITS_PER_BEAT,
-    ),
-  )
+    )
+
+    groupStart += groupLength
+    return units
+  })
 }
 
 export function buildSystems(
   measures: MeasureData[],
   timeSignature: TimeSignature,
+  groupingOverride: number[] | null,
   placeholderFocus: {
-    beatStart: number
+    groupStart: number
     measureIndex: number
     staffId: StaffId
   } | null,
   baseDuration: BaseDuration,
 ) {
+  const meter = parseTimeSignature(timeSignature, groupingOverride)
   const systems: Array<
     Array<{
       bassNoteAreaWidth: number
-      bassBeatUnits: number[]
+      bassGroupUnits: number[]
+      groupSubdivisionLengths: number[]
       measure: MeasureData
       measureIndex: number
       noteAreaWidth: number
       trebleNoteAreaWidth: number
-      trebleBeatUnits: number[]
+      trebleGroupUnits: number[]
       width: number
     }>
   > = []
   let currentSystem: Array<{
     bassNoteAreaWidth: number
-    bassBeatUnits: number[]
+    bassGroupUnits: number[]
+    groupSubdivisionLengths: number[]
     measure: MeasureData
     measureIndex: number
     noteAreaWidth: number
     trebleNoteAreaWidth: number
-    trebleBeatUnits: number[]
+    trebleGroupUnits: number[]
     width: number
   }> = []
   let currentWidth = 0
   const maxWidth = SYSTEM_WRAP_WIDTH - SYSTEM_SIDE_PADDING * 2
-  const beatsPerMeasure = getBeatsPerMeasure(timeSignature)
 
   measures.forEach((measure, measureIndex) => {
-    const focusedTrebleBeatStart =
+    const focusedTrebleGroupStart =
       placeholderFocus?.measureIndex === measureIndex &&
       placeholderFocus.staffId === 'treble'
-        ? placeholderFocus.beatStart
+        ? placeholderFocus.groupStart
         : null
-    const focusedBassBeatStart =
+    const focusedBassGroupStart =
       placeholderFocus?.measureIndex === measureIndex &&
       placeholderFocus.staffId === 'bass'
-        ? placeholderFocus.beatStart
+        ? placeholderFocus.groupStart
         : null
-    const trebleBeatUnits = getStaffBeatVisualUnits(
+    const trebleGroupUnits = getStaffGroupVisualUnits(
       measure.trebleItems,
-      beatsPerMeasure,
-      focusedTrebleBeatStart,
-      focusedTrebleBeatStart === null ? null : baseDuration,
+      meter.groupSubdivisionLengths,
+      focusedTrebleGroupStart,
+      focusedTrebleGroupStart === null ? null : baseDuration,
     )
-    const bassBeatUnits = getStaffBeatVisualUnits(
+    const bassGroupUnits = getStaffGroupVisualUnits(
       measure.bassItems,
-      beatsPerMeasure,
-      focusedBassBeatStart,
-      focusedBassBeatStart === null ? null : baseDuration,
+      meter.groupSubdivisionLengths,
+      focusedBassGroupStart,
+      focusedBassGroupStart === null ? null : baseDuration,
     )
     const trebleNoteAreaWidth = Math.ceil(
-      trebleBeatUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
+      trebleGroupUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
     )
     const bassNoteAreaWidth = Math.ceil(
-      bassBeatUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
+      bassGroupUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
     )
     const noteAreaWidth = Math.max(trebleNoteAreaWidth, bassNoteAreaWidth)
     const measureWidth =
@@ -525,12 +712,13 @@ export function buildSystems(
       noteAreaWidth + (currentSystem.length === 0 ? MEASURE_DECORATION_WIDTH : 0)
     currentSystem.push({
       bassNoteAreaWidth,
-      bassBeatUnits,
+      bassGroupUnits,
+      groupSubdivisionLengths: meter.groupSubdivisionLengths,
       measure,
       measureIndex,
       noteAreaWidth,
       trebleNoteAreaWidth,
-      trebleBeatUnits,
+      trebleGroupUnits,
       width: widthForSystem,
     })
     currentWidth += widthForSystem
