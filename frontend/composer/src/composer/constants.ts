@@ -24,7 +24,7 @@ export type AccidentalType = '#' | 'b' | 'n'
 export type ArticulationType = 'staccato' | 'staccatissimo' | 'tenuto' | 'portato' | 'marcato' | 'accent'
 export type OrnamentType = 'trill' | 'turn' | 'turnInverted' | 'mordent' | 'mordentInverted'
 export type DynamicType = 'ppp' | 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' | 'fff' | 'sfz' | 'fz' | 'fp' | 'pf'
-export type ToolbarTab = 'notes' | 'articulations' | 'ornaments' | 'dynamics' | 'bars' | 'text'
+export type ToolbarTab = 'notes' | 'articulations' | 'ornaments' | 'dynamics' | 'bars' | 'text' | 'gallery'
 
 export const MAX_UNDO_HISTORY = 50
 
@@ -101,7 +101,7 @@ export const GRAND_STAFF_GAP = 104
 export const SYSTEM_WRAP_WIDTH = 1120
 export const SYSTEM_SIDE_PADDING = 36
 export const SYSTEM_FIRST_MEASURE_WIDTH = 252
-export const SYSTEM_MEASURE_WIDTH = 182
+export const SYSTEM_MEASURE_WIDTH = 220
 export const SCORE_PADDING_BOTTOM = 44
 export const NOTE_COLOR = '#0f172a'
 export const ACTIVE_COLOR = '#2563eb'

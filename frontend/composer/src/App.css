@@ -32,7 +32,7 @@
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 16px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.92);
   color: #1958dc;
   font-weight: 900;
@@ -68,7 +68,7 @@
 
 .primary-pill {
   padding: 12px 20px;
-  border-radius: 999px;
+  border-radius: 0;
   background: #fff;
   color: #1958dc;
   font-weight: 700;
@@ -81,7 +81,7 @@
   justify-content: center;
   min-width: 124px;
   padding: 12px 16px;
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
   font-weight: 600;
@@ -102,7 +102,7 @@
   min-width: 248px;
   padding: 14px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 18px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
   color: #0f172a;
@@ -123,7 +123,7 @@
   width: 100%;
   padding: 10px 12px;
   border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 12px;
+  border-radius: 0;
   font: inherit;
 }
 
@@ -137,7 +137,7 @@
   gap: 16px;
   padding: 16px 18px;
   border: 1px solid rgba(108, 128, 163, 0.2);
-  border-radius: 28px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.07);
   backdrop-filter: blur(10px);
@@ -171,7 +171,7 @@
 
 .tool {
   padding: 10px 14px;
-  border-radius: 14px;
+  border-radius: 0;
   background: #edf3ff;
   color: #1e293b;
   font-weight: 600;
@@ -266,7 +266,7 @@
   height: 9px;
   border-top: 3px solid currentColor;
   border-right: 3px solid currentColor;
-  border-radius: 0 12px 0 0;
+  border-radius: 0;
   transform: skewY(18deg);
 }
 
@@ -307,7 +307,7 @@
 .panel {
   padding: 18px;
   border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 22px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 16px 30px rgba(15, 23, 42, 0.06);
 }
@@ -357,7 +357,7 @@
 .score-paper {
   padding: 24px 24px 18px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 32px;
+  border-radius: 0;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
   box-shadow: 0 28px 54px rgba(15, 23, 42, 0.08);
 }
@@ -393,7 +393,7 @@
 .status-box {
   max-width: 420px;
   padding: 14px 16px;
-  border-radius: 18px;
+  border-radius: 0;
   background: #eef4ff;
   color: #1d4ed8;
   font-weight: 600;
@@ -423,7 +423,7 @@
 .playhead-line {
   position: absolute;
   width: 3px;
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(37, 99, 235, 0.92);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.56);
   pointer-events: none;
@@ -440,7 +440,7 @@
 .score-front-hotspot {
   position: absolute;
   border: 1px dashed transparent;
-  border-radius: 12px;
+  border-radius: 0;
   background: rgba(37, 99, 235, 0.01);
   cursor: pointer;
   z-index: 7;
@@ -459,15 +459,15 @@
   min-width: 280px;
   padding: 16px;
   border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 22px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.14);
   z-index: 9;
 }
 
 .score-front-popover--time {
-  width: 392px;
-  max-width: min(392px, calc(100vw - 64px));
+  width: 480px;
+  max-width: min(480px, calc(100vw - 64px));
 }
 
 .score-front-popover--key {
@@ -519,7 +519,7 @@
 .score-front-option {
   min-height: 46px;
   border: 1px solid #d9e1ef;
-  border-radius: 14px;
+  border-radius: 0;
   background: #f8fbff;
   color: #20304f;
   font: inherit;
@@ -551,7 +551,7 @@
   position: absolute;
   width: 30px;
   height: 2px;
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(37, 99, 235, 0.85);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.64);
   pointer-events: none;
@@ -628,7 +628,7 @@
   height: 10px;
   border-top: 3px solid #2563eb;
   border-right: 3px solid #2563eb;
-  border-radius: 0 12px 0 0;
+  border-radius: 0;
   transform: skewY(18deg);
 }
 
@@ -653,7 +653,7 @@
 .cursor-label {
   margin-top: -2px;
   padding: 4px 8px;
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(37, 99, 235, 0.12);
   color: #1d4ed8;
   font-size: 0.78rem;
@@ -702,7 +702,7 @@
 
   .score-paper {
     padding: 18px;
-    border-radius: 24px;
+    border-radius: 0;
   }
 
   .score-heading {
@@ -760,7 +760,7 @@
   width: 140px;
   padding: 5px 10px;
   border: 1.5px solid #d0d5dd;
-  border-radius: 6px;
+  border-radius: 0;
   font-size: 13px;
   outline: none;
   transition: border-color 0.2s;
@@ -775,7 +775,7 @@
   width: 150px;
   padding: 4px 8px;
   border: 1.5px solid #d0d5dd;
-  border-radius: 5px;
+  border-radius: 0;
   font-size: 12px;
   outline: none;
   transition: border-color 0.2s;
@@ -844,7 +844,7 @@
 .tempo-chip,
 .secondary-pill {
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 .primary-pill {
@@ -872,7 +872,7 @@
   min-width: 180px;
   padding: 10px 14px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 18px;
+  border-radius: 0;
   background: #f7f9fd;
 }
 
@@ -890,7 +890,7 @@
 
 .toolbar-shell {
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 28px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 18px 38px rgba(15, 23, 42, 0.08);
   overflow: hidden;
@@ -924,7 +924,7 @@
   right: 0;
   bottom: -1px;
   height: 3px;
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(37, 99, 235, 0.92);
 }
 
@@ -957,7 +957,7 @@
   gap: 2px;
   min-width: 210px;
   padding: 10px 12px;
-  border-radius: 16px;
+  border-radius: 0;
   background: #f6f8fc;
   color: #334155;
   font-size: 0.86rem;
@@ -987,7 +987,7 @@
   padding: 14px 16px;
   border: 1px solid #dce5f6;
   border-right: 1px solid #dce5f6;
-  border-radius: 20px;
+  border-radius: 0;
   background: #f9fbff;
 }
 
@@ -1082,7 +1082,7 @@ button[title='Load Fur Elise Demo']::before {
   height: 44px;
   padding: 0 14px;
   border: 1px solid #d7dfef;
-  border-radius: 14px;
+  border-radius: 0;
   background: #f8fbff;
   color: #1e293b;
   font-weight: 700;
@@ -1107,7 +1107,7 @@ button[title='Load Fur Elise Demo']::before {
   height: 44px;
   padding: 10px 12px;
   border: 1px solid #d7dfef;
-  border-radius: 14px;
+  border-radius: 0;
   background: #fff;
   color: #0f172a;
   font: inherit;
@@ -1118,7 +1118,7 @@ button[title='Load Fur Elise Demo']::before {
   height: 44px;
   padding: 10px 12px;
   border: 1px solid #d7dfef;
-  border-radius: 14px;
+  border-radius: 0;
   background: #fff;
   color: #0f172a;
   font: inherit;
@@ -1182,7 +1182,7 @@ button[title='Load Fur Elise Demo']::before {
   min-width: 220px;
   padding: 11px 14px;
   border: 1px solid #d7dfef;
-  border-radius: 14px;
+  border-radius: 0;
   background: #fff;
   color: #0f172a;
   font: inherit;
@@ -1256,7 +1256,7 @@ button[title='Load Fur Elise Demo']::before {
 
 .score-paper {
   padding: 24px;
-  border-radius: 30px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.97);
   box-shadow: 0 26px 52px rgba(15, 23, 42, 0.08);
 }
@@ -1327,7 +1327,7 @@ button[title='Load Fur Elise Demo']::before {
 
 .meta-input {
   width: 100%;
-  border-radius: 10px;
+  border-radius: 0;
   background: rgba(248, 250, 252, 0.9);
 }
 
@@ -1416,7 +1416,7 @@ button[title='Load Fur Elise Demo']::before {
 
   .score-paper {
     padding: 18px;
-    border-radius: 24px;
+    border-radius: 0;
   }
 
   .score-credit-fields {
@@ -1426,4 +1426,57 @@ button[title='Load Fur Elise Demo']::before {
   .meta-field {
     min-width: 100%;
   }
+}
+
+.gallery-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.gallery-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  border: 1px solid #ccc;
+  background: white;
+  padding: 16px 20px;
+  gap: 8px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: box-shadow 0.2s;
+}
+
+.gallery-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  border-color: #999;
+}
+
+.gallery-card__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #222;
+}
+
+.gallery-card__sub {
+  font-size: 0.95rem;
+  color: #555;
+  font-style: italic;
+}
+
+.gallery-card__composer {
+  font-size: 0.9rem;
+  color: #666;
+  margin-top: 4px;
+}
+
+.gallery-card__meta {
+  font-size: 0.8rem;
+  color: #888;
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }

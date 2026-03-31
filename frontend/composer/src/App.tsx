@@ -93,6 +93,8 @@ import {
   yToPitch,
 } from './composer/score'
 import { createFurEliseMeasures } from './composer/furElise'
+import { createRainMeasures, RAIN_META } from './composer/demos/rain'
+import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
 const NOTE_VISUAL_SHIFT = 4
@@ -100,9 +102,6 @@ const REST_VISUAL_SHIFT = 11
 const MEASURE_EDGE_PADDING = 3
 const GRID_EDGE_PADDING = 10
 const DEFAULT_GROUP_VISUAL_UNITS = 2
-const SCORE_FRONT_KEY_X = 34
-const SCORE_FRONT_KEY_WIDTH = 26
-const SCORE_FRONT_KEY_POPOVER_WIDTH = 540
 const SCORE_FRONT_TIME_X = 56
 const SCORE_FRONT_TIME_WIDTH = 34
 const SCORE_FRONT_TIME_POPOVER_WIDTH = 392
@@ -115,6 +114,7 @@ const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'dynamics', label: 'Dynamics', hint: 'Attach expressive dynamic markings to the selected note.' },
   { id: 'bars', label: 'Measures', hint: 'Manage bars, meter, playback demo, and reset tools.' },
   { id: 'text', label: 'Text', hint: 'Edit score title fields and lyrics for the selected note.' },
+  { id: 'gallery', label: '🎹 Gallery', hint: 'Load a piano masterpiece and start editing it.' },
 ]
 
 const ARTICULATION_OPTIONS: Array<{
@@ -122,13 +122,13 @@ const ARTICULATION_OPTIONS: Array<{
   label: string
   value: ArticulationType
 }> = [
-  { glyph: '.', label: 'Staccato', value: 'staccato' },
-  { glyph: 'v', label: 'Staccatissimo', value: 'staccatissimo' },
-  { glyph: '-', label: 'Tenuto', value: 'tenuto' },
-  { glyph: '._', label: 'Portato', value: 'portato' },
-  { glyph: '^', label: 'Marcato', value: 'marcato' },
-  { glyph: '>', label: 'Accent', value: 'accent' },
-]
+    { glyph: '.', label: 'Staccato', value: 'staccato' },
+    { glyph: 'v', label: 'Staccatissimo', value: 'staccatissimo' },
+    { glyph: '-', label: 'Tenuto', value: 'tenuto' },
+    { glyph: '._', label: 'Portato', value: 'portato' },
+    { glyph: '^', label: 'Marcato', value: 'marcato' },
+    { glyph: '>', label: 'Accent', value: 'accent' },
+  ]
 
 const ARTICULATION_LABELS: Record<ArticulationType, string> = {
   accent: 'Accent',
@@ -144,12 +144,12 @@ const ORNAMENT_OPTIONS: Array<{
   label: string
   value: OrnamentType
 }> = [
-  { glyph: 'tr', label: 'Trill', value: 'trill' },
-  { glyph: 'turn', label: 'Turn', value: 'turn' },
-  { glyph: 'inv', label: 'Inv. Turn', value: 'turnInverted' },
-  { glyph: 'mord', label: 'Mordent', value: 'mordent' },
-  { glyph: 'inv mord', label: 'Inv. Mordent', value: 'mordentInverted' },
-]
+    { glyph: 'tr', label: 'Trill', value: 'trill' },
+    { glyph: 'turn', label: 'Turn', value: 'turn' },
+    { glyph: 'inv', label: 'Inv. Turn', value: 'turnInverted' },
+    { glyph: 'mord', label: 'Mordent', value: 'mordent' },
+    { glyph: 'inv mord', label: 'Inv. Mordent', value: 'mordentInverted' },
+  ]
 
 const ORNAMENT_LABELS: Record<OrnamentType, string> = {
   mordent: 'Mordent',
@@ -166,27 +166,28 @@ const KEY_SIGNATURE_OPTIONS: Array<{
   label: string
   value: KeySignatureSpec
 }> = [
-  { glyph: 'Natural', label: 'Natural / C major', value: 'C' },
-  { glyph: '♯', label: '1 sharp', value: 'G' },
-  { glyph: '♯♯', label: '2 sharps', value: 'D' },
-  { glyph: '♯♯♯', label: '3 sharps', value: 'A' },
-  { glyph: '♯♯♯♯', label: '4 sharps', value: 'E' },
-  { glyph: '♯♯♯♯♯', label: '5 sharps', value: 'B' },
-  { glyph: '♯♯♯♯♯♯', label: '6 sharps', value: 'F#' },
-  { glyph: '♯♯♯♯♯♯♯', label: '7 sharps', value: 'C#' },
-  { glyph: '♭', label: '1 flat', value: 'F' },
-  { glyph: '♭♭', label: '2 flats', value: 'Bb' },
-  { glyph: '♭♭♭', label: '3 flats', value: 'Eb' },
-  { glyph: '♭♭♭♭', label: '4 flats', value: 'Ab' },
-  { glyph: '♭♭♭♭♭', label: '5 flats', value: 'Db' },
-  { glyph: '♭♭♭♭♭♭', label: '6 flats', value: 'Gb' },
-  { glyph: '♭♭♭♭♭♭♭', label: '7 flats', value: 'Cb' },
-]
+    { glyph: 'Natural', label: 'Natural / C major', value: 'C' },
+    { glyph: '♯', label: '1 sharp', value: 'G' },
+    { glyph: '♯♯', label: '2 sharps', value: 'D' },
+    { glyph: '♯♯♯', label: '3 sharps', value: 'A' },
+    { glyph: '♯♯♯♯', label: '4 sharps', value: 'E' },
+    { glyph: '♯♯♯♯♯', label: '5 sharps', value: 'B' },
+    { glyph: '♯♯♯♯♯♯', label: '6 sharps', value: 'F#' },
+    { glyph: '♯♯♯♯♯♯♯', label: '7 sharps', value: 'C#' },
+    { glyph: '♭', label: '1 flat', value: 'F' },
+    { glyph: '♭♭', label: '2 flats', value: 'Bb' },
+    { glyph: '♭♭♭', label: '3 flats', value: 'Eb' },
+    { glyph: '♭♭♭♭', label: '4 flats', value: 'Ab' },
+    { glyph: '♭♭♭♭♭', label: '5 flats', value: 'Db' },
+    { glyph: '♭♭♭♭♭♭', label: '6 flats', value: 'Gb' },
+    { glyph: '♭♭♭♭♭♭♭', label: '7 flats', value: 'Cb' },
+  ]
 
 const TAB_SELECTION_HINT: Record<Exclude<ToolbarTab, 'notes'>, string> = {
   articulations: 'Click an existing note while this tab is open to select it.',
   bars: 'Click a bar in the score to target it, then set a tempo mark from the Measures toolbar.',
   dynamics: 'Click an existing note to choose where the dynamic marking should appear.',
+  gallery: 'Click a demo card to load that piece as your score.',
   ornaments: 'Click an existing note to add or remove an ornament.',
   text: 'Click an existing note to attach lyrics, or edit the score title block below.',
 }
@@ -215,6 +216,11 @@ const TAB_SIDEBAR_TIPS: Record<ToolbarTab, string[]> = {
     'Click any measure in the score to target that bar for tempo changes.',
     'Click the time signature or key signature at the front of a system to open its chooser directly on the score.',
     'Set a bar tempo to draw a metronome mark above that measure and change playback from there onward.',
+  ],
+  gallery: [
+    'Click any demo card to load that piano piece as your working score.',
+    'After loading, switch to the Notes tab to edit the score and add your own notes.',
+    'All 9 pieces are recognizable simplifications — you can extend them further.',
   ],
   text: [
     'Select a note to edit its lyric text, then apply or clear the lyric from the toolbar.',
@@ -758,19 +764,19 @@ function createVisualNote(
   const note =
     item.kind === 'note'
       ? new StaveNote({
-          clef: staffId,
-          dots: item.dots,
-          duration: item.baseDuration,
-          keys: item.pitches,
-          stemDirection: getChordStemDirection(item.pitches, staffId),
-        })
+        clef: staffId,
+        dots: item.dots,
+        duration: item.baseDuration,
+        keys: item.pitches,
+        stemDirection: getChordStemDirection(item.pitches, staffId),
+      })
       : new StaveNote({
-          clef: staffId,
-          dots: item.dots,
-          duration: item.baseDuration,
-          keys: [getRestKey(staffId)],
-          type: 'r',
-        })
+        clef: staffId,
+        dots: item.dots,
+        duration: item.baseDuration,
+        keys: [getRestKey(staffId)],
+        type: 'r',
+      })
 
   const color =
     eraseHoverItemId === item.id
@@ -824,7 +830,7 @@ function createVisualNote(
         const dynAnn = new Annotation(getDynamicGlyphText(item.dynamic))
         dynAnn.setVerticalJustification(Annotation.VerticalJustify.BOTTOM)
         dynAnn.setFont('Bravura, Academico, "Times New Roman", serif', 26, 'normal', 'normal')
-        dynAnn.setYShift(-6)
+        dynAnn.setYShift(-24)
         note.addModifier(dynAnn)
       }
       if (item.lyrics) {
@@ -896,6 +902,8 @@ function getGroupPlaceholderLength(
     }
   })
 
+  // No items in this group: default to quarter-note granularity (8 subdivisions)
+  // so an empty 4/4 beat shows 1 quarter rest
   if (smallestLength === null || smallestLength >= 8) {
     return 8
   }
@@ -915,36 +923,37 @@ function getPlaceholderDurationForLength(length: number): {
   baseDuration: RenderDuration
   dots: 0 | 1
 } {
-  if (length >= 24) {
-    return { baseDuration: 'h', dots: 1 }
-  }
-
-  if (length >= 12) {
-    return { baseDuration: 'q', dots: 1 }
-  }
-
-  if (length >= 6) {
-    return { baseDuration: '8', dots: 1 }
-  }
-
-  if (length >= 3) {
-    return { baseDuration: '16', dots: 1 }
-  }
-
+  // Check large values first (descending order is critical)
   if (length >= 32) {
     return { baseDuration: 'w', dots: 0 }
+  }
+
+  if (length >= 24) {
+    return { baseDuration: 'h', dots: 1 }
   }
 
   if (length >= 16) {
     return { baseDuration: 'h', dots: 0 }
   }
 
+  if (length >= 12) {
+    return { baseDuration: 'q', dots: 1 }
+  }
+
   if (length >= 8) {
     return { baseDuration: 'q', dots: 0 }
   }
 
+  if (length >= 6) {
+    return { baseDuration: '8', dots: 1 }
+  }
+
   if (length >= 4) {
     return { baseDuration: '8', dots: 0 }
+  }
+
+  if (length >= 3) {
+    return { baseDuration: '16', dots: 1 }
   }
 
   if (length >= 2) {
@@ -954,51 +963,39 @@ function getPlaceholderDurationForLength(length: number): {
   return { baseDuration: '32', dots: 0 }
 }
 
-function clampPlaceholderLength(maxLength: number, preferredLength: number) {
-  if (preferredLength <= maxLength) {
-    return preferredLength
-  }
-
-  if (maxLength >= 32) {
-    return 32
-  }
-
-  if (maxLength >= 16) {
-    return 16
-  }
-
-  if (maxLength >= 8) {
-    return 8
-  }
-
-  if (maxLength >= 4) {
-    return 4
-  }
-
-  if (maxLength >= 2) {
-    return 2
-  }
-
-  return 1
-}
-
-
-
 function getFocusedPlaceholderLength(
   items: ScoreItem[],
   subdivision: number,
   subdivisionsPerMeasure: number,
   focusedBaseDuration: BaseDuration,
+  cursorSubdivision: number | null,
+  groupStart: number,
+  groupLength: number,
 ) {
-  const nextStart =
-    findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
-  const maxLength = Math.max(
-    1,
-    Math.min(nextStart - subdivision, subdivisionsPerMeasure - subdivision),
-  )
+  const nextStart = findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
+  const groupEnd = groupStart + groupLength
+  const maxLength = Math.max(1, Math.min(nextStart - subdivision, groupEnd - subdivision))
   const preferredLength = getDurationSubdivisions(focusedBaseDuration, false)
 
-  return clampPlaceholderLength(maxLength, preferredLength)
+  let bestL = 1
+  for (const L of [32, 16, 8, 4, 2, 1]) {
+    if (L <= maxLength && subdivision % L === 0) {
+      if (L <= preferredLength) {
+        bestL = L
+        break
+      } else {
+        const cursorInside = cursorSubdivision !== null && 
+                             cursorSubdivision >= subdivision && 
+                             cursorSubdivision < subdivision + L
+        if (!cursorInside) {
+          bestL = L
+          break
+        }
+      }
+    }
+  }
+
+  return bestL
 }
 
 function getPlaceholderLength(
@@ -1010,12 +1007,21 @@ function getPlaceholderLength(
   const groupInfo = getSubdivisionGroupInfo(subdivision, groupSubdivisionLengths)
   const groupStart = groupInfo.start
   const groupEnd = Math.min(groupStart + groupInfo.length, subdivisionsPerMeasure)
-  const nextStart =
-    findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
-  const maxLength = Math.min(nextStart - subdivision, groupEnd - subdivision)
+  const nextStart = findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
+  const maxLength = Math.max(1, Math.min(nextStart - subdivision, groupEnd - subdivision))
   const preferredLength = getGroupPlaceholderLength(items, groupStart, groupInfo.length)
 
-  return clampPlaceholderLength(maxLength, preferredLength)
+  let bestL = 1
+  for (const L of [32, 16, 8, 4, 2, 1]) {
+    if (L <= maxLength && subdivision % L === 0) {
+      if (L <= preferredLength) {
+        bestL = L
+        break
+      }
+    }
+  }
+
+  return bestL
 }
 
 function buildStaffVoiceData(
@@ -1037,7 +1043,7 @@ function buildStaffVoiceData(
   let subdivision = 0
   const focusedGroupStart =
     placeholderFocus?.measureIndex === measureIndex &&
-    placeholderFocus.staffId === staffId
+      placeholderFocus.staffId === staffId
       ? placeholderFocus.groupStart
       : null
 
@@ -1069,11 +1075,14 @@ function buildStaffVoiceData(
       subdivision < focusedGroupStart + groupInfo.length
     const placeholderLength = isFocusedGroup
       ? getFocusedPlaceholderLength(
-          items,
-          subdivision,
-          subdivisionsPerMeasure,
-          focusedBaseDuration,
-        )
+        items,
+        subdivision,
+        subdivisionsPerMeasure,
+        focusedBaseDuration,
+        cursorSubdivision,
+        focusedGroupStart!,
+        groupInfo.length,
+      )
       : getPlaceholderLength(items, subdivision, subdivisionsPerMeasure, groupSubdivisionLengths)
     const placeholderDuration = getPlaceholderDurationForLength(placeholderLength)
     const isHighlighted = cursorSubdivision !== null && subdivision === cursorSubdivision
@@ -1217,9 +1226,11 @@ function clampPreviewX(
     previewDotted,
   )
 
+  const offset = previewBaseDuration === '16' ? -6 : 0
+
   return Math.min(
     measureRight - right - MEASURE_EDGE_PADDING,
-    Math.max(measureLeft + left + MEASURE_EDGE_PADDING, previewX),
+    Math.max(measureLeft + left + MEASURE_EDGE_PADDING, previewX + offset),
   )
 }
 
@@ -1434,6 +1445,7 @@ function App() {
   )
   const [hoveredRestPosition, setHoveredRestPosition] = useState<HoveredRestPosition | null>(null)
   const [pendingInsertPreview, setPendingInsertPreview] = useState<PendingInsertPreview | null>(null)
+  const [chordHoverPreview, setChordHoverPreview] = useState<PendingInsertPreview | null>(null)
   const [slurs, setSlurs] = useState<ScoreSlur[]>([])
   const [pendingSlurSelection, setPendingSlurSelection] = useState<PendingSlurSelection | null>(null)
   const [scoreFrontPopover, setScoreFrontPopover] = useState<ScoreFrontPopover | null>(null)
@@ -1479,7 +1491,7 @@ function App() {
         Math.max(
           widest,
           system.reduce((sum, entry) => sum + entry.width, 0) +
-            SYSTEM_SIDE_PADDING * 2,
+          SYSTEM_SIDE_PADDING * 2,
         ),
       0,
     ),
@@ -1501,28 +1513,18 @@ function App() {
       const systemTop = scoreTop + systemIndex * SYSTEM_GAP_Y - 12
       const systemLeft = SYSTEM_SIDE_PADDING
 
-      return [
-        {
-          height: SCORE_FRONT_HOTSPOT_HEIGHT,
-          kind: 'keySignature',
-          left: systemLeft + SCORE_FRONT_KEY_X,
-          measureIndex: firstEntry.measureIndex,
-          top: systemTop,
-          width: SCORE_FRONT_KEY_WIDTH,
-        },
-        ...(systemIndex === 0
-          ? [{
-              height: SCORE_FRONT_HOTSPOT_HEIGHT,
-              kind: 'timeSignature' as const,
-              left: systemLeft + SCORE_FRONT_TIME_X,
-              measureIndex: firstEntry.measureIndex,
-              top: systemTop,
-              width: SCORE_FRONT_TIME_WIDTH,
-            }]
-          : []),
-      ]
+      return systemIndex === 0
+        ? [{
+            height: SCORE_FRONT_HOTSPOT_HEIGHT,
+            kind: 'timeSignature' as const,
+            left: systemLeft + SCORE_FRONT_TIME_X,
+            measureIndex: firstEntry.measureIndex,
+            top: systemTop,
+            width: SCORE_FRONT_TIME_WIDTH,
+          }]
+        : []
     }),
-  [scoreTop, systems])
+    [scoreTop, systems])
   const selectedDurationName = getDurationName(baseDuration, dotted)
   const dotEnabled = canUseDot(baseDuration)
   const activeSelection = useMemo(() => {
@@ -1590,7 +1592,7 @@ function App() {
     setTimeSignatureDenominatorInput(String(meterDefinition.denominator) as '2' | '4' | '8' | '16')
     setTimeSignatureGroupingInput(
       TIME_SIGNATURE_OPTIONS.some((option) => option.value === meterDefinition.display) &&
-      haveSameNumberSequence(meterDefinition.grouping, defaultMeter.grouping)
+        haveSameNumberSequence(meterDefinition.grouping, defaultMeter.grouping)
         ? ''
         : formatGroupingInput(meterDefinition.grouping),
     )
@@ -1653,7 +1655,8 @@ function App() {
       mode !== 'note' ||
       activeItemId ||
       hoveredRestPosition ||
-      pendingInsertPreview
+      pendingInsertPreview ||
+      chordHoverPreview
     ) {
       return
     }
@@ -1662,7 +1665,7 @@ function App() {
     if (nextPosition) {
       focusRestPosition(nextPosition)
     }
-  }, [activeItemId, activeTab, hoveredRestPosition, measures, mode, pendingInsertPreview])
+  }, [activeItemId, activeTab, chordHoverPreview, hoveredRestPosition, measures, mode, pendingInsertPreview])
 
   function clearScheduledPlayback() {
     scheduledTransportEventsRef.current.forEach((eventId) => {
@@ -1750,8 +1753,6 @@ function App() {
         if (isSystemStart) {
           trebleStave.addClef('treble')
           bassStave.addClef('bass')
-          trebleStave.addKeySignature(keySignature)
-          bassStave.addKeySignature(keySignature)
 
           if (systemIndex === 0) {
             trebleStave.addTimeSignature(timeSignature)
@@ -1798,14 +1799,14 @@ function App() {
         const cursorPosition = pendingInsertPreview ?? hoveredRestPosition
         const trebleCursorSub =
           cursorPosition &&
-          cursorPosition.measureIndex === entry.measureIndex &&
-          cursorPosition.staffId === 'treble'
+            cursorPosition.measureIndex === entry.measureIndex &&
+            cursorPosition.staffId === 'treble'
             ? cursorPosition.subdivision
             : null
         const bassCursorSub =
           cursorPosition &&
-          cursorPosition.measureIndex === entry.measureIndex &&
-          cursorPosition.staffId === 'bass'
+            cursorPosition.measureIndex === entry.measureIndex &&
+            cursorPosition.staffId === 'bass'
             ? cursorPosition.subdivision
             : null
         const trebleData = buildStaffVoiceData(
@@ -2003,12 +2004,12 @@ function App() {
 
       new Curve(fromEntry.note, toEntry.note, {
         cps: [
-          { x: 0, y: slur.staffId === 'bass' ? 20 : 34 },
-          { x: 0, y: slur.staffId === 'bass' ? 20 : 34 },
+          { x: 10, y: slur.staffId === 'bass' ? 30 : -40 },
+          { x: 10, y: slur.staffId === 'bass' ? 30 : -40 },
         ],
         invert: slur.staffId === 'bass',
         xShift: 2,
-        yShift: slur.staffId === 'bass' ? 6 : -8,
+        yShift: slur.staffId === 'bass' ? 20 : -30,
       })
         .setContext(context)
         .draw()
@@ -2100,6 +2101,7 @@ function App() {
 
   function clearHoverState() {
     setEraseHoverItemId(null)
+    setChordHoverPreview(null)
   }
 
   function findFirstAvailableRestPosition(sourceMeasures: MeasureData[]) {
@@ -2304,8 +2306,8 @@ function App() {
       const exactStartItem = findStartingItem(items, start)
       const matchingStartItem =
         exactStartItem &&
-        exactStartItem.baseDuration === baseDuration &&
-        exactStartItem.dots === (dotted ? 1 : 0)
+          exactStartItem.baseDuration === baseDuration &&
+          exactStartItem.dots === (dotted ? 1 : 0)
           ? exactStartItem
           : undefined
 
@@ -2357,21 +2359,21 @@ function App() {
       const inserted: ScoreItem =
         kind === 'note'
           ? {
-              baseDuration,
-              dots: dotted ? 1 : 0,
-              id: generateId(),
-              kind,
-              pitches: [pitch],
-              start,
-              ...(accidental ? { accidentals: { [pitch]: accidental } } : {}),
-            }
+            baseDuration,
+            dots: dotted ? 1 : 0,
+            id: generateId(),
+            kind,
+            pitches: [pitch],
+            start,
+            ...(accidental ? { accidentals: { [pitch]: accidental } } : {}),
+          }
           : {
-              baseDuration,
-              dots: dotted ? 1 : 0,
-              id: generateId(),
-              kind,
-              start,
-            }
+            baseDuration,
+            dots: dotted ? 1 : 0,
+            id: generateId(),
+            kind,
+            start,
+          }
 
       filtered.push(inserted)
       replaceStaffItems(draft, measureIndex, staffId, filtered)
@@ -2594,10 +2596,10 @@ function App() {
         setPendingInsertPreview((current) =>
           current
             ? {
-                ...current,
-                pitch,
-                previewY,
-              }
+              ...current,
+              pitch,
+              previewY,
+            }
             : current,
         )
       }
@@ -2651,11 +2653,36 @@ function App() {
           staffId,
           subdivision: snapped,
         })
+        setChordHoverPreview(null)
       } else {
         setHoveredRestPosition(null)
+
+        let isHoveringActiveChordTarget = false
+        if (pointerTarget.targetItem?.kind === 'note' && pointerTarget.targetItem.id === activeItemId) {
+          const canEditSelectedChord =
+            pointerTarget.targetItem.baseDuration === baseDuration &&
+            pointerTarget.targetItem.dots === (dotted ? 1 : 0) &&
+            (!pointerTarget.targetItem.pitches.includes(pointerTarget.pitch) || event.shiftKey)
+
+          isHoveringActiveChordTarget = canEditSelectedChord
+        }
+
+        if (isHoveringActiveChordTarget) {
+          setChordHoverPreview({
+            measureIndex: pointerTarget.hitBox.index,
+            pitch: pointerTarget.pitch,
+            previewX: pointerTarget.previewX,
+            previewY: pointerTarget.previewY,
+            staffId: pointerTarget.hitBox.staffId,
+            subdivision: pointerTarget.snappedSubdivision,
+          })
+        } else {
+          setChordHoverPreview(null)
+        }
       }
     } else {
       setHoveredRestPosition(null)
+      setChordHoverPreview(null)
     }
 
     if (mode === 'erase') {
@@ -2745,7 +2772,7 @@ function App() {
         setHelpCard(getToolbarTabHelp(activeTab))
         setStatus(
           TAB_SELECTION_HINT[activeTab] ??
-            'This tab edits existing notes rather than inserting new ones.',
+          'This tab edits existing notes rather than inserting new ones.',
         )
       }
       return
@@ -2828,10 +2855,12 @@ function App() {
           pointerTarget.pitch,
           'note',
         )
+        setChordHoverPreview(null)
         return
       }
 
       clearPendingInsertPreview()
+      setChordHoverPreview(null)
       setActiveItemId(pointerTarget.targetItem.id)
       setHoveredRestPosition(null)
       setHelpCard(
@@ -3124,21 +3153,7 @@ function App() {
     )
   }
 
-  function changeKeySignature(nextKeySignature: KeySignatureSpec) {
-    if (nextKeySignature === keySignature) {
-      setScoreFrontPopover(null)
-      return
-    }
 
-    setKeySignature(nextKeySignature)
-    setHelpCard(KEY_SIGNATURE_HELP[nextKeySignature])
-    setScoreFrontPopover(null)
-    setStatus(
-      nextKeySignature === 'C'
-        ? 'Switched the score to the natural key signature.'
-        : `Switched the score to the ${nextKeySignature} key signature.`,
-    )
-  }
 
   function openScoreFrontPopover(hotspot: ScoreFrontHotspot) {
     if (
@@ -3257,6 +3272,47 @@ function App() {
     setHelpCard(BAR_ACTION_HELP.clear)
     clearHoverState()
     setStatus('Score cleared. The blue teardrop now marks the next insert position.')
+  }
+
+  function loadDemo(
+    createMeasuresFn: () => MeasureData[],
+    meta: {
+      arranger: string
+      composer: string
+      keySignature: KeySignatureSpec
+      lyricist: string
+      subtitle: string
+      tempoBpm: number
+      timeSignature: TimeSignature
+      title: string
+    },
+  ) {
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    setTimeSignature(meta.timeSignature)
+    setTimeSignatureGrouping(null)
+    setKeySignature(meta.keySignature)
+    setMeasures(createMeasuresFn())
+    setSlurs([])
+    setTempoBpm(meta.tempoBpm)
+    clearPendingInsertPreview()
+    setPendingSlurSelection(null)
+    setScoreFrontPopover(null)
+    setActiveMeasureIndex(0)
+    setBaseDuration('8')
+    setActiveTab('notes')
+    setHelpCard(getToolbarTabHelp('notes'))
+    setMode('note')
+    setActiveItemId(null)
+    setScoreTitle(meta.title)
+    setScoreSubtitle(meta.subtitle)
+    setScoreComposer(meta.composer)
+    setScoreLyricist(meta.lyricist)
+    setScoreArranger(meta.arranger)
+    clearHoverState()
+    setStatus(`Loaded: ${meta.title}${meta.composer ? ` \u2014 ${meta.composer}` : ''}. Press Play to listen!`)
   }
 
   function applyLyrics(text: string) {
@@ -3556,380 +3612,343 @@ function App() {
 
           <div className="toolbar-panel">
             <div className="toolbar">
-          {activeTab === 'notes' ? (
-          <>
-          <div className="tool-group tool-group--duration">
-            <span className="group-label">Note Value</span>
-            {DURATION_OPTIONS.map((option) => (
-              <button
-                key={option.baseDuration}
-                aria-label={option.label}
-                className={
-                  baseDuration === option.baseDuration
-                    ? 'tool tool--glyph active'
-                    : 'tool tool--glyph'
-                }
-                onClick={() => selectDuration(option.baseDuration)}
-                title={option.label}
-                type="button"
-              >
-                {buildDurationGlyph(option.baseDuration, false)}
-              </button>
-            ))}
-          </div>
+              {activeTab === 'notes' ? (
+                <>
+                  <div className="tool-group tool-group--duration">
+                    <span className="group-label">Note Value</span>
+                    {DURATION_OPTIONS.map((option) => (
+                      <button
+                        key={option.baseDuration}
+                        aria-label={option.label}
+                        className={
+                          baseDuration === option.baseDuration
+                            ? 'tool tool--glyph active'
+                            : 'tool tool--glyph'
+                        }
+                        onClick={() => selectDuration(option.baseDuration)}
+                        title={option.label}
+                        type="button"
+                      >
+                        {buildDurationGlyph(option.baseDuration, false)}
+                      </button>
+                    ))}
+                  </div>
 
-          <div className="tool-group">
-            <span className="group-label">Dot</span>
-            <button
-              aria-label="Toggle dotted value"
-              className={dotted ? 'tool tool--glyph active' : 'tool tool--glyph'}
-              disabled={!dotEnabled}
-              onClick={() => {
-                setDotted((current) => !current)
-                setHelpCard(DOTTED_HELP)
-              }}
-              title="Dot"
-              type="button"
-            >
-              {buildDurationGlyph(baseDuration, true, 'dot-glyph')}
-            </button>
-          </div>
+                  <div className="tool-group">
+                    <span className="group-label">Dot</span>
+                    <button
+                      aria-label="Toggle dotted value"
+                      className={dotted ? 'tool tool--glyph active' : 'tool tool--glyph'}
+                      disabled={!dotEnabled}
+                      onClick={() => {
+                        setDotted((current) => !current)
+                        setHelpCard(DOTTED_HELP)
+                      }}
+                      title="Dot"
+                      type="button"
+                    >
+                      {buildDurationGlyph(baseDuration, true, 'dot-glyph')}
+                    </button>
+                  </div>
 
-          <div className="tool-group">
-            <span className="group-label">Accidentals</span>
-            <button
-              aria-label="Natural"
-              className={accidental === 'n' ? 'tool tool--acc active' : 'tool tool--acc'}
-              onClick={() => {
-                setAccidental((current) => (current === 'n' ? null : 'n'))
-                setHelpCard(ACCIDENTAL_HELP.n)
-              }}
-              title="Natural"
-              type="button"
-            >
-              <span className="acc-symbol">&#x266E;</span>
-            </button>
-            <button
-              aria-label="Sharp"
-              className={accidental === '#' ? 'tool tool--acc active' : 'tool tool--acc'}
-              onClick={() => {
-                setAccidental((current) => (current === '#' ? null : '#'))
-                setHelpCard(ACCIDENTAL_HELP['#'])
-              }}
-              title="Sharp"
-              type="button"
-            >
-              <span className="acc-symbol">&#x266F;</span>
-            </button>
-            <button
-              aria-label="Flat"
-              className={accidental === 'b' ? 'tool tool--acc active' : 'tool tool--acc'}
-              onClick={() => {
-                setAccidental((current) => (current === 'b' ? null : 'b'))
-                setHelpCard(ACCIDENTAL_HELP.b)
-              }}
-              title="Flat"
-              type="button"
-            >
-              <span className="acc-symbol">&#x266D;</span>
-            </button>
-          </div>
+                  <div className="tool-group">
+                    <span className="group-label">Accidentals</span>
+                    <button
+                      aria-label="Natural"
+                      className={accidental === 'n' ? 'tool tool--acc active' : 'tool tool--acc'}
+                      onClick={() => {
+                        setAccidental((current) => (current === 'n' ? null : 'n'))
+                        setHelpCard(ACCIDENTAL_HELP.n)
+                      }}
+                      title="Natural"
+                      type="button"
+                    >
+                      <span className="acc-symbol">&#x266E;</span>
+                    </button>
+                    <button
+                      aria-label="Sharp"
+                      className={accidental === '#' ? 'tool tool--acc active' : 'tool tool--acc'}
+                      onClick={() => {
+                        setAccidental((current) => (current === '#' ? null : '#'))
+                        setHelpCard(ACCIDENTAL_HELP['#'])
+                      }}
+                      title="Sharp"
+                      type="button"
+                    >
+                      <span className="acc-symbol">&#x266F;</span>
+                    </button>
+                    <button
+                      aria-label="Flat"
+                      className={accidental === 'b' ? 'tool tool--acc active' : 'tool tool--acc'}
+                      onClick={() => {
+                        setAccidental((current) => (current === 'b' ? null : 'b'))
+                        setHelpCard(ACCIDENTAL_HELP.b)
+                      }}
+                      title="Flat"
+                      type="button"
+                    >
+                      <span className="acc-symbol">&#x266D;</span>
+                    </button>
+                  </div>
 
-          <div className="tool-group">
-            <span className="group-label">Action</span>
-            <button
-              className={mode === 'note' ? 'tool active' : 'tool'}
-              onClick={() => selectMode('note')}
-              type="button"
-            >
-              Insert Note
-            </button>
-            <button
-              className={mode === 'rest' ? 'tool active' : 'tool'}
-              onClick={() => selectMode('rest')}
-              type="button"
-            >
-              Insert Rest
-            </button>
-            <button
-              className={mode === 'tie' ? 'tool active' : 'tool'}
-              onClick={() => selectMode('tie')}
-              type="button"
-            >
-              Tie
-            </button>
-            <button
-              className={mode === 'slur' ? 'tool active' : 'tool'}
-              onClick={() => selectMode('slur')}
-              type="button"
-            >
-              Slur
-            </button>
-            <button
-              className={mode === 'erase' ? 'tool active' : 'tool'}
-              onClick={() => selectMode('erase')}
-              type="button"
-            >
-              Erase
-            </button>
-          </div>
-          </>
-          ) : null}
+                  <div className="tool-group">
+                    <span className="group-label">Action</span>
+                    <button
+                      className={mode === 'note' ? 'tool active' : 'tool'}
+                      onClick={() => selectMode('note')}
+                      type="button"
+                    >
+                      Insert Note
+                    </button>
+                    <button
+                      className={mode === 'rest' ? 'tool active' : 'tool'}
+                      onClick={() => selectMode('rest')}
+                      type="button"
+                    >
+                      Insert Rest
+                    </button>
+                    <button
+                      className={mode === 'tie' ? 'tool active' : 'tool'}
+                      onClick={() => selectMode('tie')}
+                      type="button"
+                    >
+                      Tie
+                    </button>
+                    <button
+                      className={mode === 'slur' ? 'tool active' : 'tool'}
+                      onClick={() => selectMode('slur')}
+                      type="button"
+                    >
+                      Slur
+                    </button>
+                    <button
+                      className={mode === 'erase' ? 'tool active' : 'tool'}
+                      onClick={() => selectMode('erase')}
+                      type="button"
+                    >
+                      Erase
+                    </button>
+                  </div>
+                </>
+              ) : null}
 
-          {activeTab === 'bars' ? (
-          <>
-          <div className="tool-group tool-group--wide tool-group--time-signature">
-            <span className="group-label">Time Signature</span>
-            <div className="time-signature-grid">
-              {TIME_SIGNATURE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={timeSignature === option.value ? 'tool active' : 'tool'}
-                  onClick={() => changeTimeSignature(option.value)}
-                  type="button"
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <div className="time-signature-custom">
-              <label className="toolbar-inline-field">
-                <span>Numerator</span>
-                <input
-                  inputMode="numeric"
-                  onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
-                  type="text"
-                  value={timeSignatureNumeratorInput}
-                />
-              </label>
-              <label className="toolbar-inline-field">
-                <span>Denominator</span>
-                <select
-                  className="toolbar-select"
-                  onChange={(event) =>
-                    setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
-                  }
-                  value={timeSignatureDenominatorInput}
-                >
-                  <option value="2">2</option>
-                  <option value="4">4</option>
-                  <option value="8">8</option>
-                  <option value="16">16</option>
-                </select>
-              </label>
-              <label className="toolbar-inline-field toolbar-inline-field--grouping">
-                <span>Grouping</span>
-                <input
-                  onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
-                  placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
-                  type="text"
-                  value={timeSignatureGroupingInput}
-                />
-              </label>
-              <button className="tool" onClick={applyCustomTimeSignature} type="button">
-                Apply Meter
-              </button>
-            </div>
-          </div>
+              {activeTab === 'bars' ? (
+                <>
+                  <div className="tool-group tool-group--time-signature">
+                    <span className="group-label">Time & Key Sig</span>
+                    {(['4/4', '3/4', '2/4'] as const).map((ts) => (
+                      <button
+                        key={ts}
+                        className={timeSignature === ts ? 'tool active' : 'tool'}
+                        onClick={() => changeTimeSignature(ts)}
+                        type="button"
+                      >
+                        {ts}
+                      </button>
+                    ))}
+                  </div>
 
-          <div className="tool-group tool-group--wide tool-group--key-signature">
-            <span className="group-label">Key Signature</span>
-            <div className="key-signature-grid">
-              {KEY_SIGNATURE_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={
-                    keySignature === option.value
-                      ? 'tool tool--key-signature active'
-                      : 'tool tool--key-signature'
-                  }
-                  onClick={() => changeKeySignature(option.value)}
-                  title={option.label}
-                  type="button"
-                >
-                  {option.glyph}
-                </button>
-              ))}
-            </div>
-          </div>
+                  <div className="tool-group tool-group--bar-tempo">
+                    <span className="group-label">Bar Tempo</span>
+                    <div className="toolbar-chip">Bar {boundedActiveMeasureIndex + 1}</div>
+                    <label className="toolbar-inline-field toolbar-inline-field--tempo">
+                      <span>BPM</span>
+                      <input
+                        max={MAX_BPM}
+                        min={MIN_BPM}
+                        onChange={(event) => setMeasureTempoInput(event.target.value)}
+                        type="number"
+                        value={measureTempoInput}
+                      />
+                    </label>
+                    <button className="tool" onClick={applyTempoToActiveMeasure} type="button">
+                      Set Bar Tempo
+                    </button>
+                    <button
+                      className="tool tool--ghost"
+                      disabled={!activeMeasure?.tempoBpm}
+                      onClick={clearTempoFromActiveMeasure}
+                      type="button"
+                    >
+                      Clear Tempo
+                    </button>
+                  </div>
 
-          <div className="tool-group tool-group--bar-tempo">
-            <span className="group-label">Bar Tempo</span>
-            <div className="toolbar-chip">Bar {boundedActiveMeasureIndex + 1}</div>
-            <label className="toolbar-inline-field toolbar-inline-field--tempo">
-              <span>BPM</span>
-              <input
-                max={MAX_BPM}
-                min={MIN_BPM}
-                onChange={(event) => setMeasureTempoInput(event.target.value)}
-                type="number"
-                value={measureTempoInput}
-              />
-            </label>
-            <button className="tool" onClick={applyTempoToActiveMeasure} type="button">
-              Set Bar Tempo
-            </button>
-            <button
-              className="tool tool--ghost"
-              disabled={!activeMeasure?.tempoBpm}
-              onClick={clearTempoFromActiveMeasure}
-              type="button"
-            >
-              Clear Tempo
-            </button>
-          </div>
+                  <div className="tool-group compact">
+                    <span className="group-label">Bars</span>
+                    <button className="tool" onClick={addMeasure} type="button">
+                      + Bar
+                    </button>
+                    <button className="tool" onClick={removeMeasure} type="button">
+                      - Bar
+                    </button>
+                  </div>
 
-          <div className="tool-group compact">
-            <span className="group-label">Bars</span>
-            <button className="tool" onClick={addMeasure} type="button">
-              + Bar
-            </button>
-            <button className="tool" onClick={removeMeasure} type="button">
-              - Bar
-            </button>
-          </div>
+                  <div className="tool-group compact">
+                    <span className="group-label">Score</span>
+                    <button className="tool" onClick={loadFurElise} title="Load Fur Elise Demo" type="button">
+                      🎹 Demo
+                    </button>
+                    <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
+                      Clear
+                    </button>
+                  </div>
+                </>
+              ) : null}
 
-          <div className="tool-group compact">
-            <span className="group-label">Score</span>
-            <button className="tool" onClick={loadFurElise} title="Load Fur Elise Demo" type="button">
-              🎹 Demo
-            </button>
-            <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
-              Clear
-            </button>
-          </div>
-          </>
-          ) : null}
+              {activeTab === 'articulations' ? (
+                <div className="tool-group tool-group--wide tool-group--flush">
+                  <span className="group-label">Marks</span>
+                  {ARTICULATION_OPTIONS.map((option) => (
+                    <button
+                      aria-label={option.label}
+                      key={option.value}
+                      className={
+                        activeNote?.articulation === option.value
+                          ? 'tool tool--symbol tool--symbol-icon active'
+                          : 'tool tool--symbol tool--symbol-icon'
+                      }
+                      onClick={() => toggleArticulation(option.value)}
+                      title={option.label}
+                      type="button"
+                    >
+                      <span className="tool-symbol">{option.glyph}</span>
+                    </button>
+                  ))}
+                  <button
+                    className="tool tool--ghost"
+                    disabled={!activeNote?.articulation}
+                    onClick={clearArticulation}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
 
-          {activeTab === 'articulations' ? (
-          <div className="tool-group tool-group--wide tool-group--flush">
-            <span className="group-label">Marks</span>
-            {ARTICULATION_OPTIONS.map((option) => (
-              <button
-                aria-label={option.label}
-                key={option.value}
-                className={
-                  activeNote?.articulation === option.value
-                    ? 'tool tool--symbol tool--symbol-icon active'
-                    : 'tool tool--symbol tool--symbol-icon'
-                }
-                onClick={() => toggleArticulation(option.value)}
-                title={option.label}
-                type="button"
-              >
-                <span className="tool-symbol">{option.glyph}</span>
-              </button>
-            ))}
-            <button
-              className="tool tool--ghost"
-              disabled={!activeNote?.articulation}
-              onClick={clearArticulation}
-              type="button"
-            >
-              Clear
-            </button>
-          </div>
-          ) : null}
+              {activeTab === 'ornaments' ? (
+                <div className="tool-group tool-group--wide tool-group--flush">
+                  <span className="group-label">Ornaments</span>
+                  {ORNAMENT_OPTIONS.map((option) => (
+                    <button
+                      aria-label={option.label}
+                      key={option.value}
+                      className={
+                        activeNote?.ornament === option.value
+                          ? 'tool tool--symbol tool--symbol-icon active'
+                          : 'tool tool--symbol tool--symbol-icon'
+                      }
+                      onClick={() => toggleOrnament(option.value)}
+                      title={option.label}
+                      type="button"
+                    >
+                      <span className="tool-symbol tool-symbol--script">{option.glyph}</span>
+                    </button>
+                  ))}
+                  <button
+                    className="tool tool--ghost"
+                    disabled={!activeNote?.ornament}
+                    onClick={clearOrnament}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
 
-          {activeTab === 'ornaments' ? (
-          <div className="tool-group tool-group--wide tool-group--flush">
-            <span className="group-label">Ornaments</span>
-            {ORNAMENT_OPTIONS.map((option) => (
-              <button
-                aria-label={option.label}
-                key={option.value}
-                className={
-                  activeNote?.ornament === option.value
-                    ? 'tool tool--symbol tool--symbol-icon active'
-                    : 'tool tool--symbol tool--symbol-icon'
-                }
-                onClick={() => toggleOrnament(option.value)}
-                title={option.label}
-                type="button"
-              >
-                <span className="tool-symbol tool-symbol--script">{option.glyph}</span>
-              </button>
-            ))}
-            <button
-              className="tool tool--ghost"
-              disabled={!activeNote?.ornament}
-              onClick={clearOrnament}
-              type="button"
-            >
-              Clear
-            </button>
-          </div>
-          ) : null}
+              {activeTab === 'dynamics' ? (
+                <div className="tool-group tool-group--wide tool-group--flush">
+                  <span className="group-label">Dynamics</span>
+                  {DYNAMIC_OPTIONS.map((dynamic) => (
+                    <button
+                      key={dynamic}
+                      aria-label={dynamic.toUpperCase()}
+                      className={
+                        activeNote?.dynamic === dynamic
+                          ? 'tool tool--dynamic active'
+                          : 'tool tool--dynamic'
+                      }
+                      onClick={() => toggleDynamic(dynamic)}
+                      title={dynamic.toUpperCase()}
+                      type="button"
+                    >
+                      {getDynamicGlyphText(dynamic)}
+                    </button>
+                  ))}
+                  <button
+                    className="tool tool--ghost"
+                    disabled={!activeNote?.dynamic}
+                    onClick={clearDynamic}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
 
-          {activeTab === 'dynamics' ? (
-          <div className="tool-group tool-group--wide tool-group--flush">
-            <span className="group-label">Dynamics</span>
-            {DYNAMIC_OPTIONS.map((dynamic) => (
-              <button
-                key={dynamic}
-                aria-label={dynamic.toUpperCase()}
-                className={
-                  activeNote?.dynamic === dynamic
-                    ? 'tool tool--dynamic active'
-                    : 'tool tool--dynamic'
-                }
-                onClick={() => toggleDynamic(dynamic)}
-                title={dynamic.toUpperCase()}
-                type="button"
-              >
-                {getDynamicGlyphText(dynamic)}
-              </button>
-            ))}
-            <button
-              className="tool tool--ghost"
-              disabled={!activeNote?.dynamic}
-              onClick={clearDynamic}
-              type="button"
-            >
-              Clear
-            </button>
-          </div>
-          ) : null}
+              {activeTab === 'text' ? (
+                <div className="tool-group tool-group--wide tool-group--flush">
+                  <span className="group-label">Lyrics</span>
+                  <input
+                    className="toolbar-input"
+                    disabled={!activeNote}
+                    onChange={(event) => setLyricsInput(event.target.value)}
+                    placeholder={
+                      activeNote
+                        ? 'Type lyrics for the selected note'
+                        : 'Select a note in the score first'
+                    }
+                    type="text"
+                    value={lyricsInput}
+                  />
+                  <button
+                    className="tool"
+                    disabled={!activeNote}
+                    onClick={() => applyLyrics(lyricsInput)}
+                    type="button"
+                  >
+                    Apply Lyrics
+                  </button>
+                  <button
+                    className="tool tool--ghost"
+                    disabled={!activeNote || !activeNote.lyrics}
+                    onClick={() => {
+                      setLyricsInput('')
+                      applyLyrics('')
+                    }}
+                    type="button"
+                  >
+                    Clear Lyrics
+                  </button>
+                  <div className="toolbar-note">
+                    Edit the large title block directly above the staff. Changes update live.
+                  </div>
+                </div>
+              ) : null}
 
-          {activeTab === 'text' ? (
-          <div className="tool-group tool-group--wide tool-group--flush">
-            <span className="group-label">Lyrics</span>
-            <input
-              className="toolbar-input"
-              disabled={!activeNote}
-              onChange={(event) => setLyricsInput(event.target.value)}
-              placeholder={
-                activeNote
-                  ? 'Type lyrics for the selected note'
-                  : 'Select a note in the score first'
-              }
-              type="text"
-              value={lyricsInput}
-            />
-            <button
-              className="tool"
-              disabled={!activeNote}
-              onClick={() => applyLyrics(lyricsInput)}
-              type="button"
-            >
-              Apply Lyrics
-            </button>
-            <button
-              className="tool tool--ghost"
-              disabled={!activeNote || !activeNote.lyrics}
-              onClick={() => {
-                setLyricsInput('')
-                applyLyrics('')
-              }}
-              type="button"
-            >
-              Clear Lyrics
-            </button>
-            <div className="toolbar-note">
-              Edit the large title block directly above the staff. Changes update live.
-            </div>
-          </div>
-          ) : null}
+              {activeTab === 'gallery' ? (
+                <div className="tool-group tool-group--gallery">
+                  <span className="group-label">Piano Masterpieces</span>
+                  <div className="gallery-grid">
+                    {[
+                      { factory: createFurEliseMeasuresNew, meta: FUR_ELISE_META },
+                      { factory: createRainMeasures, meta: RAIN_META },
+                    ].map((demo) => (
+                      <button
+                        key={demo.meta.title}
+                        className="gallery-card"
+                        onClick={() => loadDemo(demo.factory, demo.meta)}
+                        type="button"
+                      >
+                        <span className="gallery-card__title">{demo.meta.title}</span>
+                        {demo.meta.subtitle && <span className="gallery-card__sub">{demo.meta.subtitle}</span>}
+                        <span className="gallery-card__composer">{demo.meta.composer}</span>
+                        <span className="gallery-card__meta">{demo.meta.timeSignature} · {demo.meta.tempoBpm} BPM · Key: {demo.meta.keySignature}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -4130,10 +4149,10 @@ function App() {
                     }}
                   />
                 ) : null}
-                {mode === 'note' && pendingInsertPreview ? (
+                {mode === 'note' && (pendingInsertPreview || chordHoverPreview) ? (
                   <PendingInsertIndicator
                     hitBoxes={hitBoxesRef.current}
-                    position={pendingInsertPreview}
+                    position={(pendingInsertPreview || chordHoverPreview)!}
                   />
                 ) : null}
                 {mode === 'note' && pendingInsertPreview ? (
@@ -4167,7 +4186,7 @@ function App() {
                     }
                     className={
                       scoreFrontPopover?.kind === hotspot.kind &&
-                      scoreFrontPopover.measureIndex === hotspot.measureIndex
+                        scoreFrontPopover.measureIndex === hotspot.measureIndex
                         ? 'score-front-hotspot is-active'
                         : 'score-front-hotspot'
                     }
@@ -4186,16 +4205,9 @@ function App() {
                 ))}
                 {scoreFrontPopover ? (
                   <div
-                    className={
-                      scoreFrontPopover.kind === 'timeSignature'
-                        ? 'score-front-popover score-front-popover--time'
-                        : 'score-front-popover score-front-popover--key'
-                    }
+                    className="score-front-popover score-front-popover--time"
                     style={(() => {
-                      const popoverWidth =
-                        scoreFrontPopover.kind === 'timeSignature'
-                          ? SCORE_FRONT_TIME_POPOVER_WIDTH
-                          : SCORE_FRONT_KEY_POPOVER_WIDTH
+                      const popoverWidth = SCORE_FRONT_TIME_POPOVER_WIDTH
                       const left = Math.min(
                         Math.max(scoreFrontPopover.anchorLeft, 18),
                         Math.max(scoreWidth - popoverWidth - 18, 18),
@@ -4208,11 +4220,7 @@ function App() {
                     })()}
                   >
                     <div className="score-front-popover__header">
-                      <strong>
-                        {scoreFrontPopover.kind === 'timeSignature'
-                          ? 'Time Signature'
-                          : 'Key Signature'}
-                      </strong>
+                      <strong>Time Signature</strong>
                       <button
                         className="score-front-popover__close"
                         onClick={() => setScoreFrontPopover(null)}
@@ -4221,81 +4229,61 @@ function App() {
                         Close
                       </button>
                     </div>
-                    {scoreFrontPopover.kind === 'timeSignature' ? (
-                      <>
-                        <div className="score-front-popover__row score-front-popover__row--time">
-                          {TIME_SIGNATURE_OPTIONS.map((option) => (
-                            <button
-                              key={option.value}
-                              className={
-                                timeSignature === option.value
-                                  ? 'score-front-option active'
-                                  : 'score-front-option'
-                              }
-                              onClick={() => changeTimeSignature(option.value)}
-                              type="button"
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="score-front-popover__custom-meter">
-                          <label className="toolbar-inline-field">
-                            <span>Numerator</span>
-                            <input
-                              inputMode="numeric"
-                              onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
-                              type="text"
-                              value={timeSignatureNumeratorInput}
-                            />
-                          </label>
-                          <label className="toolbar-inline-field">
-                            <span>Denominator</span>
-                            <select
-                              className="toolbar-select"
-                              onChange={(event) =>
-                                setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
-                              }
-                              value={timeSignatureDenominatorInput}
-                            >
-                              <option value="2">2</option>
-                              <option value="4">4</option>
-                              <option value="8">8</option>
-                              <option value="16">16</option>
-                            </select>
-                          </label>
-                          <label className="toolbar-inline-field toolbar-inline-field--grouping">
-                            <span>Grouping</span>
-                            <input
-                              onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
-                              placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
-                              type="text"
-                              value={timeSignatureGroupingInput}
-                            />
-                          </label>
-                          <button className="tool" onClick={applyCustomTimeSignature} type="button">
-                            Apply Meter
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="score-front-popover__key-grid">
-                        {KEY_SIGNATURE_OPTIONS.map((option) => (
-                          <button
-                            key={option.value}
-                            className={
-                              keySignature === option.value
-                                ? 'score-front-option score-front-option--key active'
-                                : 'score-front-option score-front-option--key'
-                            }
-                            onClick={() => changeKeySignature(option.value)}
-                            type="button"
-                          >
-                            {option.glyph}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    
+                    <div className="score-front-popover__row score-front-popover__row--time">
+                      {TIME_SIGNATURE_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={
+                            timeSignature === option.value
+                              ? 'score-front-option active'
+                              : 'score-front-option'
+                          }
+                          onClick={() => changeTimeSignature(option.value)}
+                          type="button"
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="score-front-popover__custom-meter">
+                      <label className="toolbar-inline-field">
+                        <span>Numerator</span>
+                        <input
+                          inputMode="numeric"
+                          onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
+                          type="text"
+                          value={timeSignatureNumeratorInput}
+                        />
+                      </label>
+                      <label className="toolbar-inline-field">
+                        <span>Denominator</span>
+                        <select
+                          className="toolbar-select"
+                          onChange={(event) =>
+                            setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
+                          }
+                          value={timeSignatureDenominatorInput}
+                        >
+                          <option value="2">2</option>
+                          <option value="4">4</option>
+                          <option value="8">8</option>
+                          <option value="16">16</option>
+                        </select>
+                      </label>
+                      <label className="toolbar-inline-field toolbar-inline-field--grouping">
+                        <span>Grouping</span>
+                        <input
+                          onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
+                          placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
+                          type="text"
+                          value={timeSignatureGroupingInput}
+                        />
+                      </label>
+                      <button className="tool" onClick={applyCustomTimeSignature} type="button">
+                        Apply Meter
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>
