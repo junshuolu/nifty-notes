@@ -213,10 +213,39 @@ export function getDurationPreviewClass(baseDuration: BaseDuration): string {
   )
 }
 
+function parsePitchToken(pitch: NotePitch) {
+  const [noteToken = 'c', octave = '4'] = pitch.split('/')
+  const match = /^([a-gA-G])([#b]?)$/.exec(noteToken.trim())
+  const letter = (match?.[1] ?? noteToken[0] ?? 'c').toLowerCase()
+  const embeddedAccidental = (match?.[2] ?? '') as '' | '#' | 'b'
+
+  return {
+    embeddedAccidental,
+    letter,
+    naturalPitch: `${letter}/${octave}` as NotePitch,
+    octave,
+  }
+}
+
+function getResolvedPitchAccidental(
+  pitch: NotePitch,
+  accidental?: AccidentalType | null,
+): '' | '#' | 'b' {
+  if (accidental === '#' || accidental === 'b') {
+    return accidental
+  }
+
+  if (accidental === 'n') {
+    return ''
+  }
+
+  return parsePitchToken(pitch).embeddedAccidental
+}
+
 export function toTonePitch(pitch: NotePitch, accidental?: AccidentalType | null): string {
-  const [note, octave] = pitch.split('/')
-  const acc = accidental === '#' ? '#' : accidental === 'b' ? 'b' : ''
-  return `${note.toUpperCase()}${acc}${octave}`
+  const { letter, octave } = parsePitchToken(pitch)
+  const acc = getResolvedPitchAccidental(pitch, accidental)
+  return `${letter.toUpperCase()}${acc}${octave}`
 }
 
 export function cloneMeasures(measures: MeasureData[]): MeasureData[] {
@@ -339,8 +368,13 @@ export function sortPitches(
   staffId: StaffId,
 ): NotePitch[] {
   const pool = getPitchPool(staffId)
+  const getPitchIndex = (pitch: NotePitch) => {
+    const index = pool.indexOf(parsePitchToken(pitch).naturalPitch)
+    return index >= 0 ? index : Number.MAX_SAFE_INTEGER
+  }
+
   return [...new Set(pitches)].sort(
-    (left, right) => pool.indexOf(left) - pool.indexOf(right),
+    (left, right) => getPitchIndex(left) - getPitchIndex(right),
   )
 }
 
@@ -504,15 +538,23 @@ export function pitchToY(
   staffId: StaffId,
 ): number {
   const pool = getPitchPool(staffId)
-  const pitchIndex = pool.findIndex((value) => value === pitch)
+  const pitchIndex = pool.findIndex((value) => value === parsePitchToken(pitch).naturalPitch)
   const safeIndex = pitchIndex >= 0 ? pitchIndex : 8
   return topLineY + (safeIndex - getTopLineIndex(staffId)) * (spacing / 2)
 }
 
 export function getPitchLabel(pitch: NotePitch, accidental?: AccidentalType | null): string {
-  const [note, octave] = pitch.split('/')
-  const accSymbol = accidental === '#' ? '\u266F' : accidental === 'b' ? '\u266D' : accidental === 'n' ? '\u266E' : ''
-  return `${note.toUpperCase()}${accSymbol}${octave}`
+  const { letter, octave } = parsePitchToken(pitch)
+  const resolvedAccidental = getResolvedPitchAccidental(pitch, accidental)
+  const accSymbol =
+    accidental === 'n'
+      ? '\u266E'
+      : resolvedAccidental === '#'
+        ? '\u266F'
+        : resolvedAccidental === 'b'
+          ? '\u266D'
+          : ''
+  return `${letter.toUpperCase()}${accSymbol}${octave}`
 }
 
 export function getPitchLabels(pitches: NotePitch[], accidentals?: Record<string, AccidentalType>): string {
@@ -738,7 +780,7 @@ export function getChordStemDirection(
   const pool = getPitchPool(staffId)
   const middleIndex = 6
   const indexes = pitches
-    .map((pitch) => pool.indexOf(pitch))
+    .map((pitch) => pool.indexOf(parsePitchToken(pitch).naturalPitch))
     .filter((index) => index >= 0)
 
   if (indexes.length === 0) {
