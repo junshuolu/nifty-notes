@@ -107,6 +107,7 @@ const SCORE_FRONT_TIME_WIDTH = 34
 const SCORE_FRONT_TIME_POPOVER_WIDTH = 392
 const SCORE_FRONT_HOTSPOT_HEIGHT = GRAND_STAFF_GAP + 62
 
+
 const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'notes', label: 'Notes', hint: 'Pitch, duration, accidentals, and insert tools.' },
   { id: 'articulations', label: 'Articulations', hint: 'Apply touch and accent marks to the selected note.' },
@@ -1414,7 +1415,10 @@ function PendingInsertIndicator({
 }
 
 function App() {
+  const [isToolbarExpanded, setIsToolbarExpanded] = useState(true)
   const scoreRef = useRef<HTMLDivElement | null>(null)
+  const scoreContainerRef = useRef<HTMLElement | null>(null)
+  const [availableScoreWidth, setAvailableScoreWidth] = useState(SYSTEM_WRAP_WIDTH)
   const tempoPanelRef = useRef<HTMLDivElement | null>(null)
   const hitBoxesRef = useRef<MeasureHitBox[]>([])
   const pianoRef = useRef<Tone.Sampler | null>(null)
@@ -1485,7 +1489,7 @@ function App() {
   )
   const scoreTop = 96
   const scoreWidth = Math.max(
-    SYSTEM_WRAP_WIDTH,
+    availableScoreWidth,
     systems.reduce(
       (widest, system) =>
         Math.max(
@@ -1512,19 +1516,41 @@ function App() {
 
       const systemTop = scoreTop + systemIndex * SYSTEM_GAP_Y - 12
       const systemLeft = SYSTEM_SIDE_PADDING
+      const hotspots: ScoreFrontHotspot[] = []
 
-      return systemIndex === 0
-        ? [{
-            height: SCORE_FRONT_HOTSPOT_HEIGHT,
-            kind: 'timeSignature' as const,
-            left: systemLeft + SCORE_FRONT_TIME_X,
-            measureIndex: firstEntry.measureIndex,
-            top: systemTop,
-            width: SCORE_FRONT_TIME_WIDTH,
-          }]
-        : []
+      if (systemIndex === 0) {
+        const keySigWidth = keySignature === 'C' ? 15 : 35;
+
+        hotspots.push({
+          height: SCORE_FRONT_HOTSPOT_HEIGHT,
+          kind: 'keySignature' as const,
+          left: systemLeft + 35,
+          measureIndex: firstEntry.measureIndex,
+          top: systemTop,
+          width: keySigWidth,
+        })
+        hotspots.push({
+          height: SCORE_FRONT_HOTSPOT_HEIGHT,
+          kind: 'timeSignature' as const,
+          left: systemLeft + 35 + keySigWidth,
+          measureIndex: firstEntry.measureIndex,
+          top: systemTop,
+          width: SCORE_FRONT_TIME_WIDTH,
+        })
+      } else {
+        hotspots.push({
+          height: SCORE_FRONT_HOTSPOT_HEIGHT,
+          kind: 'timeSignature' as const,
+          left: systemLeft + 35,
+          measureIndex: firstEntry.measureIndex,
+          top: systemTop,
+          width: SCORE_FRONT_TIME_WIDTH,
+        })
+      }
+
+      return hotspots
     }),
-    [scoreTop, systems])
+    [keySignature, scoreTop, systems])
   const selectedDurationName = getDurationName(baseDuration, dotted)
   const dotEnabled = canUseDot(baseDuration)
   const activeSelection = useMemo(() => {
@@ -1638,6 +1664,20 @@ function App() {
   }, [isTempoPanelOpen])
 
   useEffect(() => {
+    const container = scoreContainerRef.current
+    if (!container) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newWidth = Math.floor(entry.contentRect.width) - 48
+        setAvailableScoreWidth(Math.max(newWidth, 320))
+      }
+    })
+
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [isToolbarExpanded])
+  useEffect(() => {
     setLyricsInput(activeNote?.lyrics ?? '')
   }, [activeNote?.id, activeNote?.lyrics])
 
@@ -1739,30 +1779,46 @@ function App() {
     const noteRegistry = new Map<string, { item: NoteItem; note: StaveNote }>()
     const hitBoxes: MeasureHitBox[] = []
 
+    const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2;
+
     systems.forEach((system, systemIndex) => {
       let currentX = SYSTEM_SIDE_PADDING
       const trebleY = scoreTop + systemIndex * SYSTEM_GAP_Y
       const bassY = trebleY + GRAND_STAFF_GAP
 
+      const rawSystemWidth = system.reduce((sum, entry) => sum + entry.width, 0)
+      const isLastSystem = systemIndex === systems.length - 1
+      const widthMultiplier = (isLastSystem && rawSystemWidth < targetSystemWidth * 0.5) 
+        ? 1 
+        : targetSystemWidth / rawSystemWidth
+
       system.forEach((entry, measureInSystem) => {
         const isSystemStart = measureInSystem === 0
         const isFinalMeasure = entry.measureIndex === measures.length - 1
-        const trebleStave = new Stave(currentX, trebleY, entry.width)
-        const bassStave = new Stave(currentX, bassY, entry.width)
+
+        const adjustedWidth = entry.width * widthMultiplier
+        const trebleStave = new Stave(currentX, trebleY, adjustedWidth)
+        const bassStave = new Stave(currentX, bassY, adjustedWidth)
 
         if (isSystemStart) {
           trebleStave.addClef('treble')
           bassStave.addClef('bass')
-
           if (systemIndex === 0) {
-            trebleStave.addTimeSignature(timeSignature)
-            bassStave.addTimeSignature(timeSignature)
+            trebleStave.addKeySignature(keySignature)
+            bassStave.addKeySignature(keySignature)
           }
+          trebleStave.addTimeSignature(timeSignature)
+          bassStave.addTimeSignature(timeSignature)
         }
 
         if (isFinalMeasure) {
           trebleStave.setEndBarType(BarlineType.END)
           bassStave.setEndBarType(BarlineType.END)
+
+          new StaveConnector(trebleStave, bassStave)
+            .setContext(context)
+            .setType('boldDoubleRight') 
+            .draw()
         }
 
         const explicitMeasureTempo = entry.measure.tempoBpm
@@ -1949,7 +2005,7 @@ function App() {
           xBySubdivision: bassXBySubdivision,
         })
 
-        currentX += entry.width
+        currentX += adjustedWidth
       })
     })
 
@@ -3601,14 +3657,31 @@ function App() {
                 key={tab.id}
                 aria-selected={activeTab === tab.id}
                 className={activeTab === tab.id ? 'toolbar-tab active' : 'toolbar-tab'}
-                onClick={() => selectToolbarTab(tab.id)}
+                onClick={() => {
+                  selectToolbarTab(tab.id)
+                  if (!isToolbarExpanded) setIsToolbarExpanded(true)
+                }}
                 role="tab"
                 type="button"
               >
                 {tab.label}
               </button>
             ))}
+
+            <button
+              className="toolbar-tab"
+              style={{ marginLeft: 'auto', fontWeight: 'bold' }}
+              onClick={() => setIsToolbarExpanded((current) => !current)}
+              type="button"
+            >
+              {isToolbarExpanded ? '▲ ' : '▼ '}
+            </button>
           </div>
+
+          {isToolbarExpanded && (
+            <div className="toolbar-panel">
+              <div className="toolbar">
+
 
           <div className="toolbar-panel">
             <div className="toolbar">
@@ -3618,38 +3691,26 @@ function App() {
                     <span className="group-label">Note Value</span>
                     {DURATION_OPTIONS.map((option) => (
                       <button
-                        key={option.baseDuration}
+                        key={`${option.baseDuration}-${option.dots}`}
                         aria-label={option.label}
                         className={
-                          baseDuration === option.baseDuration
+                          baseDuration === option.baseDuration && (dotted ? 1 : 0) === option.dots
                             ? 'tool tool--glyph active'
                             : 'tool tool--glyph'
                         }
-                        onClick={() => selectDuration(option.baseDuration)}
+                        onClick={() => {
+                          setBaseDuration(option.baseDuration);
+                          setDotted(option.dots === 1);
+                          setHelpCard(DURATION_HELP[option.baseDuration]);
+                        }}
                         title={option.label}
                         type="button"
                       >
-                        {buildDurationGlyph(option.baseDuration, false)}
+                        {buildDurationGlyph(option.baseDuration, option.dots === 1)}
                       </button>
                     ))}
                   </div>
 
-                  <div className="tool-group">
-                    <span className="group-label">Dot</span>
-                    <button
-                      aria-label="Toggle dotted value"
-                      className={dotted ? 'tool tool--glyph active' : 'tool tool--glyph'}
-                      disabled={!dotEnabled}
-                      onClick={() => {
-                        setDotted((current) => !current)
-                        setHelpCard(DOTTED_HELP)
-                      }}
-                      title="Dot"
-                      type="button"
-                    >
-                      {buildDurationGlyph(baseDuration, true, 'dot-glyph')}
-                    </button>
-                  </div>
 
                   <div className="tool-group">
                     <span className="group-label">Accidentals</span>
@@ -3951,6 +4012,12 @@ function App() {
               ) : null}
             </div>
           </div>
+        
+        </div>
+      </div>
+    )}
+
+          
         </div>
       </div>
       <main className="workspace">
@@ -4078,7 +4145,7 @@ function App() {
           </section>
         </aside>
 
-        <section className="score-stage">
+        <section className="score-stage" ref={scoreContainerRef}>
           <div className="score-paper score-paper--empty">
             <div className="score-header-card">
               <input
@@ -4220,70 +4287,95 @@ function App() {
                     })()}
                   >
                     <div className="score-front-popover__header">
-                      <strong>Time Signature</strong>
-                      <button
-                        className="score-front-popover__close"
-                        onClick={() => setScoreFrontPopover(null)}
-                        type="button"
-                      >
-                        Close
-                      </button>
-                    </div>
-                    
-                    <div className="score-front-popover__row score-front-popover__row--time">
-                      {TIME_SIGNATURE_OPTIONS.map((option) => (
+                    <strong>{scoreFrontPopover.kind === 'timeSignature' ? 'Time Signature' : 'Key Signature'}</strong>
+                    <button
+                      className="score-front-popover__close"
+                      onClick={() => setScoreFrontPopover(null)}
+                      type="button"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {scoreFrontPopover.kind === 'timeSignature' ? (
+                    <>
+                      <div className="score-front-popover__row score-front-popover__row--time">
+                        {TIME_SIGNATURE_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            className={
+                              timeSignature === option.value
+                                ? 'score-front-option active'
+                                : 'score-front-option'
+                            }
+                            onClick={() => changeTimeSignature(option.value)}
+                            type="button"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="score-front-popover__custom-meter">
+                        <label className="toolbar-inline-field">
+                          <span>Numerator</span>
+                          <input
+                            inputMode="numeric"
+                            onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
+                            type="text"
+                            value={timeSignatureNumeratorInput}
+                          />
+                        </label>
+                        <label className="toolbar-inline-field">
+                          <span>Denominator</span>
+                          <select
+                            className="toolbar-select"
+                            onChange={(event) =>
+                              setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
+                            }
+                            value={timeSignatureDenominatorInput}
+                          >
+                            <option value="2">2</option>
+                            <option value="4">4</option>
+                            <option value="8">8</option>
+                            <option value="16">16</option>
+                          </select>
+                        </label>
+                        <label className="toolbar-inline-field toolbar-inline-field--grouping">
+                          <span>Grouping</span>
+                          <input
+                            onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
+                            placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
+                            type="text"
+                            value={timeSignatureGroupingInput}
+                          />
+                        </label>
+                        <button className="tool" onClick={applyCustomTimeSignature} type="button">
+                          Apply Meter
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="score-front-popover__row score-front-popover__row--key">
+                      {KEY_SIGNATURE_OPTIONS.map((option) => (
                         <button
                           key={option.value}
                           className={
-                            timeSignature === option.value
+                            keySignature === option.value
                               ? 'score-front-option active'
                               : 'score-front-option'
                           }
-                          onClick={() => changeTimeSignature(option.value)}
+                          onClick={() => {
+                            setKeySignature(option.value)
+                            setScoreFrontPopover(null)
+                          }}
+                          title={option.label}
                           type="button"
                         >
-                          {option.label}
+                          {option.glyph}
                         </button>
                       ))}
                     </div>
-                    <div className="score-front-popover__custom-meter">
-                      <label className="toolbar-inline-field">
-                        <span>Numerator</span>
-                        <input
-                          inputMode="numeric"
-                          onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
-                          type="text"
-                          value={timeSignatureNumeratorInput}
-                        />
-                      </label>
-                      <label className="toolbar-inline-field">
-                        <span>Denominator</span>
-                        <select
-                          className="toolbar-select"
-                          onChange={(event) =>
-                            setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
-                          }
-                          value={timeSignatureDenominatorInput}
-                        >
-                          <option value="2">2</option>
-                          <option value="4">4</option>
-                          <option value="8">8</option>
-                          <option value="16">16</option>
-                        </select>
-                      </label>
-                      <label className="toolbar-inline-field toolbar-inline-field--grouping">
-                        <span>Grouping</span>
-                        <input
-                          onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
-                          placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
-                          type="text"
-                          value={timeSignatureGroupingInput}
-                        />
-                      </label>
-                      <button className="tool" onClick={applyCustomTimeSignature} type="button">
-                        Apply Meter
-                      </button>
-                    </div>
+                  )}
                   </div>
                 ) : null}
               </div>

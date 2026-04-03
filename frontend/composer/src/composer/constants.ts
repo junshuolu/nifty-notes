@@ -109,65 +109,12 @@ export const PLACEHOLDER_COLOR = '#c0cadc'
 export const ERASE_HOVER_COLOR = '#ef4444'
 
 export const TREBLE_PITCHES_FROM_TOP = [
-  'c/7',
-  'b/6',
-  'a/6',
-  'g/6',
-  'f/6',
-  'e/6',
-  'd/6',
-  'c/6',
-  'b/5',
-  'a/5',
-  'g/5',
-  'f/5',
-  'e/5',
-  'd/5',
-  'c/5',
-  'b/4',
-  'a/4',
-  'g/4',
-  'f/4',
-  'e/4',
-  'd/4',
-  'c/4',
-  'b/3',
-  'a/3',
-  'g/3',
-  'f/3',
-  'e/3',
-  'd/3',
-  'c/3',
+  'c/7', 'b/6', 'a/6', 'g/6', 'f/6', 'e/6', 'd/6', 'c/6', 'b/5', 'a/5', 'g/5', 'f/5', 'e/5', 'd/5', 'c/5', 'b/4', 'a/4', 'g/4', 'f/4', 'e/4', 'd/4', 'c/4', 'b/3', 'a/3', 'g/3', 'f/3', 'e/3', 'd/3', 'c/3',
 ] as const
 export const TREBLE_TOP_LINE_INDEX = 11
 
 export const BASS_PITCHES_FROM_TOP = [
-  'g/4',
-  'f/4',
-  'e/4',
-  'd/4',
-  'c/4',
-  'b/3',
-  'a/3',
-  'g/3',
-  'f/3',
-  'e/3',
-  'd/3',
-  'c/3',
-  'b/2',
-  'a/2',
-  'g/2',
-  'f/2',
-  'e/2',
-  'd/2',
-  'c/2',
-  'b/1',
-  'a/1',
-  'g/1',
-  'f/1',
-  'e/1',
-  'd/1',
-  'c/1',
+  'g/4', 'f/4', 'e/4', 'd/4', 'c/4', 'b/3', 'a/3', 'g/3', 'f/3', 'e/3', 'd/3', 'c/3', 'b/2', 'a/2', 'g/2', 'f/2', 'e/2', 'd/2', 'c/2', 'b/1', 'a/1', 'g/1', 'f/1', 'e/1', 'd/1', 'c/1',
 ] as const
 export const BASS_TOP_LINE_INDEX = 6
 
@@ -182,14 +129,17 @@ export const BASE_DURATION_SUBDIVISIONS: Record<RenderDuration, number> = {
 
 export const DURATION_OPTIONS: Array<{
   baseDuration: BaseDuration
+  dots: 0 | 1
   label: string
   previewClass: string
 }> = [
-  { baseDuration: 'w', label: 'Whole', previewClass: 'whole' },
-  { baseDuration: 'h', label: 'Half', previewClass: 'half' },
-  { baseDuration: 'q', label: 'Quarter', previewClass: 'quarter' },
-  { baseDuration: '8', label: 'Eighth', previewClass: 'eighth' },
-  { baseDuration: '16', label: 'Sixteenth', previewClass: 'sixteenth' },
+  { baseDuration: 'w', dots: 0, label: 'Whole', previewClass: 'whole' },
+  { baseDuration: 'h', dots: 1, label: 'Dotted Half', previewClass: 'dotted-half' },
+  { baseDuration: 'h', dots: 0, label: 'Half', previewClass: 'half' },
+  { baseDuration: 'q', dots: 1, label: 'Dotted Quarter', previewClass: 'dotted-quarter' },
+  { baseDuration: 'q', dots: 0, label: 'Quarter', previewClass: 'quarter' },
+  { baseDuration: '8', dots: 0, label: 'Eighth', previewClass: 'eighth' },
+  { baseDuration: '16', dots: 0, label: 'Sixteenth', previewClass: 'sixteenth' },
 ]
 
 export const PLACEHOLDER_DURATIONS: RenderDuration[] = ['w', 'h', 'q', '8', '16', '32']
@@ -204,36 +154,10 @@ export const TIME_SIGNATURE_OPTIONS: TimeSignatureOption[] = [
 ]
 
 export const PIANO_SAMPLE_URLS = {
-  A0: 'A0.mp3',
-  A1: 'A1.mp3',
-  A2: 'A2.mp3',
-  A3: 'A3.mp3',
-  A4: 'A4.mp3',
-  A5: 'A5.mp3',
-  A6: 'A6.mp3',
-  A7: 'A7.mp3',
-  C1: 'C1.mp3',
-  C2: 'C2.mp3',
-  C3: 'C3.mp3',
-  C4: 'C4.mp3',
-  C5: 'C5.mp3',
-  C6: 'C6.mp3',
-  C7: 'C7.mp3',
-  C8: 'C8.mp3',
-  'D#1': 'Ds1.mp3',
-  'D#2': 'Ds2.mp3',
-  'D#3': 'Ds3.mp3',
-  'D#4': 'Ds4.mp3',
-  'D#5': 'Ds5.mp3',
-  'D#6': 'Ds6.mp3',
-  'D#7': 'Ds7.mp3',
-  'F#1': 'Fs1.mp3',
-  'F#2': 'Fs2.mp3',
-  'F#3': 'Fs3.mp3',
-  'F#4': 'Fs4.mp3',
-  'F#5': 'Fs5.mp3',
-  'F#6': 'Fs6.mp3',
-  'F#7': 'Fs7.mp3',
+  A0: 'A0.mp3', A1: 'A1.mp3', A2: 'A2.mp3', A3: 'A3.mp3', A4: 'A4.mp3', A5: 'A5.mp3', A6: 'A6.mp3', A7: 'A7.mp3',
+  C1: 'C1.mp3', C2: 'C2.mp3', C3: 'C3.mp3', C4: 'C4.mp3', C5: 'C5.mp3', C6: 'C6.mp3', C7: 'C7.mp3', C8: 'C8.mp3',
+  'D#1': 'Ds1.mp3', 'D#2': 'Ds2.mp3', 'D#3': 'Ds3.mp3', 'D#4': 'Ds4.mp3', 'D#5': 'Ds5.mp3', 'D#6': 'Ds6.mp3', 'D#7': 'Ds7.mp3',
+  'F#1': 'Fs1.mp3', 'F#2': 'Fs2.mp3', 'F#3': 'Fs3.mp3', 'F#4': 'Fs4.mp3', 'F#5': 'Fs5.mp3', 'F#6': 'Fs6.mp3', 'F#7': 'Fs7.mp3',
 }
 
 let fallbackIdCounter = 0
@@ -246,11 +170,8 @@ export function generateId() {
   ) {
     return globalThis.crypto.randomUUID()
   }
-
   fallbackIdCounter += 1
-  return `nn-${Date.now()}-${fallbackIdCounter}-${Math.random()
-    .toString(36)
-    .slice(2, 10)}`
+  return `nn-${Date.now()}-${fallbackIdCounter}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 export function createMeasure(id?: string): MeasureData {
