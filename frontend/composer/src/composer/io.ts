@@ -412,11 +412,8 @@ export async function exportPDF(params: {
 
     const renderMmH = viewH * mmPerSvgUnit
 
-    let drawYMm = bodyTopMm
-    if (viewH < budget * 0.85 && pageIndex > 0) {
-      const emptyMm = bodyBudgetMm - renderMmH
-      drawYMm = bodyTopMm + emptyMm / 2
-    }
+    // 始终顶格：不在末页或短页把内容垂直居中（用户期望与正文区顶部对齐）
+    const drawYMm = bodyTopMm
 
     const pngDataUrl = await renderSvgSliceToPng(svg, svgW, viewY, viewH)
     pdf.addImage(pngDataUrl, 'PNG', PDF_SIDE_MARGIN_MM, drawYMm, innerW, renderMmH, undefined, 'FAST')
