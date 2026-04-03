@@ -1,3 +1,12 @@
+/* VexFlow SMuFL；与导出 PDF 所用 Bravura.ttf 同源（public/fonts，见 npm run font:bravura） */
+@font-face {
+  font-family: 'Bravura';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/Bravura.ttf') format('truetype');
+}
+
 :root {
   font-family:
     "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;

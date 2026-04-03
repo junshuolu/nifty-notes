@@ -32,6 +32,7 @@ import {
   MIN_BPM,
   NOTE_COLOR,
   PIANO_SAMPLE_URLS,
+  SCORE_CANVAS_TOP,
   SCORE_PADDING_BOTTOM,
   STAFF_IDS,
   SYSTEM_GAP_Y,
@@ -95,6 +96,7 @@ import {
 import { createFurEliseMeasures } from './composer/furElise'
 import { createRainMeasures, RAIN_META } from './composer/demos/rain'
 import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
+import { exportMusicXML, importMusicXML, exportPDF } from './composer/io'
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
 const NOTE_VISUAL_SHIFT = 4
@@ -1466,6 +1468,13 @@ function App() {
   const [timeSignatureDenominatorInput, setTimeSignatureDenominatorInput] = useState<'2' | '4' | '8' | '16'>('4')
   const [timeSignatureGroupingInput, setTimeSignatureGroupingInput] = useState('')
   const [helpCard, setHelpCard] = useState<HelpCard | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportDialog, setExportDialog] = useState<{
+    type: 'pdf' | 'musicxml'
+    filename: string
+  } | null>(null)
+  const exportFilenameInputRef = useRef<HTMLInputElement | null>(null)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   const meterDefinition = useMemo(
     () => parseTimeSignature(timeSignature, timeSignatureGrouping),
@@ -1483,7 +1492,7 @@ function App() {
     () => getMeasureTempoTimeline(measures, timeSignature, tempoBpm),
     [measures, tempoBpm, timeSignature],
   )
-  const scoreTop = 96
+  const scoreTop = SCORE_CANVAS_TOP
   const scoreWidth = Math.max(
     SYSTEM_WRAP_WIDTH,
     systems.reduce(
@@ -3526,8 +3535,220 @@ function App() {
     setHoveredRestPosition(null)
   }
 
+  // Opens the filename dialog for MusicXML export
+  function handleExportMusicXML() {
+    const defaultName = (scoreTitle || 'score').replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
+    setExportDialog({ type: 'musicxml', filename: defaultName })
+    // Auto-focus the input on next tick
+    setTimeout(() => exportFilenameInputRef.current?.select(), 30)
+  }
+
+  // Opens the filename dialog for PDF export
+  function handleExportPDF() {
+    if (isExporting) return
+    const defaultName = (scoreTitle || 'score').replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
+    setExportDialog({ type: 'pdf', filename: defaultName })
+    setTimeout(() => exportFilenameInputRef.current?.select(), 30)
+  }
+
+  // Called by the dialog's Confirm button or Enter key
+  async function confirmExport(filename: string) {
+    if (!exportDialog) return
+    const safeName = filename.trim() || 'score'
+    setExportDialog(null)
+
+    if (exportDialog.type === 'musicxml') {
+      try {
+        exportMusicXML({
+          measures,
+          timeSignature,
+          keySignature,
+          tempoBpm,
+          scoreTitle,
+          scoreComposer,
+          scoreArranger,
+          scoreLyricist,
+          scoreSubtitle,
+          overrideFilename: safeName,
+        })
+        setStatus(`MusicXML saved as "${safeName}.musicxml".`)
+      } catch (err) {
+        console.error('Export MusicXML failed:', err)
+        setStatus('Failed to export MusicXML.')
+      }
+    } else {
+      if (isExporting) return
+      setIsExporting(true)
+      setStatus('Generating PDF…')
+      try {
+        await exportPDF({
+          scoreTitle,
+          overrideFilename: safeName,
+          header: {
+            title: scoreTitle.trim() || 'Untitled',
+            subtitle: scoreSubtitle.trim() || undefined,
+            composer: scoreComposer.trim() || undefined,
+            lyricist: scoreLyricist.trim() || undefined,
+            arranger: scoreArranger.trim() || undefined,
+          },
+          pdfSafeBreakYsSvg:
+            systems.length === 0
+              ? []
+              : (() => {
+                  const ys: number[] = []
+                  const splitGuardPx = 40
+                  for (let i = 0; i < systems.length - 1; i++) {
+                    ys.push(
+                      scoreTop + i * SYSTEM_GAP_Y + GRAND_STAFF_GAP + 110 + splitGuardPx,
+                    )
+                  }
+                  return ys
+                })(),
+        })
+        setStatus(`PDF saved as "${safeName}.pdf".`)
+      } catch (err) {
+        console.error('Export PDF failed:', err)
+        setStatus('Failed to export PDF.')
+      } finally {
+        setIsExporting(false)
+      }
+    }
+  }
+
+  function handleImportMusicXML(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      if (!text) {
+        setStatus('Failed to read file.')
+        return
+      }
+      const result = importMusicXML(text)
+
+      if (result.error) {
+        setStatus(`Import failed: ${result.error}`)
+        return
+      }
+
+      if (result.measures.length === 0) {
+        setStatus('No measures found in the imported MusicXML file.')
+        return
+      }
+
+      // Stop any playing audio before replacing the score
+      pianoRef.current?.releaseAll()
+      clearScheduledPlayback()
+      stopPlaybackVisuals()
+      setIsPlaying(false)
+
+      setMeasures(result.measures)
+      setTimeSignature(result.timeSignature)
+      setTimeSignatureGrouping(null)
+      setKeySignature(result.keySignature)
+      setTempoBpm(result.tempoBpm)
+      setSlurs([])
+      clearPendingInsertPreview()
+      setPendingSlurSelection(null)
+      setScoreFrontPopover(null)
+      setActiveMeasureIndex(0)
+      setBaseDuration('q')
+      setActiveItemId(null)
+      setActiveTab('notes')
+      setMode('note')
+      clearHoverState()
+
+      if (result.title) setScoreTitle(result.title)
+      if (result.subtitle) setScoreSubtitle(result.subtitle)
+      if (result.composer) setScoreComposer(result.composer)
+      if (result.lyricist) setScoreLyricist(result.lyricist)
+      if (result.arranger) setScoreArranger(result.arranger)
+
+      setHelpCard(getToolbarTabHelp('notes'))
+      setStatus(
+        `Imported "${result.title || file.name}" — ${result.measures.length} bar(s), ${result.timeSignature}, ${result.tempoBpm} BPM.`,
+      )
+    }
+
+    reader.onerror = () => {
+      setStatus('Error reading the file. Please try again.')
+    }
+
+    reader.readAsText(file)
+    // Reset input so the same file can be re-imported
+    event.target.value = ''
+  }
+
   return (
     <div className="app-shell">
+      {exportDialog && (
+        <div
+          className="export-dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Save file"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setExportDialog(null)
+          }}
+        >
+          <div className="export-dialog">
+            <div className="export-dialog__header">
+              <span className="export-dialog__icon">
+                {exportDialog.type === 'pdf' ? '📄' : '🎼'}
+              </span>
+              <h2 className="export-dialog__title">
+                Save as {exportDialog.type === 'pdf' ? 'PDF' : 'MusicXML'}
+              </h2>
+            </div>
+            <p className="export-dialog__hint">
+              Enter a file name (without extension). The file will be saved to your Downloads folder.
+            </p>
+            <div className="export-dialog__field">
+              <input
+                ref={exportFilenameInputRef}
+                autoFocus
+                className="export-dialog__input"
+                id="export-filename-input"
+                maxLength={120}
+                onChange={(e) =>
+                  setExportDialog((d) => d ? { ...d, filename: e.target.value } : d)
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    confirmExport(exportDialog.filename)
+                  }
+                }}
+                placeholder="Score filename"
+                type="text"
+                value={exportDialog.filename}
+              />
+              <span className="export-dialog__ext">
+                .{exportDialog.type === 'pdf' ? 'pdf' : 'musicxml'}
+              </span>
+            </div>
+            <div className="export-dialog__actions">
+              <button
+                className="export-dialog__cancel"
+                onClick={() => setExportDialog(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="export-dialog__confirm"
+                disabled={!exportDialog.filename.trim()}
+                onClick={() => confirmExport(exportDialog.filename)}
+                type="button"
+              >
+                {exportDialog.type === 'pdf' ? '↓ Save PDF' : '↓ Save MusicXML'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">
@@ -3792,6 +4013,48 @@ function App() {
                     <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
                       Clear
                     </button>
+                  </div>
+
+                  <div className="tool-group compact">
+                    <span className="group-label">Export</span>
+                    <button
+                      className="tool tool--io"
+                      disabled={isExporting}
+                      onClick={handleExportPDF}
+                      title="Export score as PDF"
+                      type="button"
+                    >
+                      {isExporting ? '…' : '↓ PDF'}
+                    </button>
+                    <button
+                      className="tool tool--io"
+                      onClick={handleExportMusicXML}
+                      title="Export score as MusicXML"
+                      type="button"
+                    >
+                      ↓ MusicXML
+                    </button>
+                  </div>
+
+                  <div className="tool-group compact">
+                    <span className="group-label">Import</span>
+                    <button
+                      className="tool tool--io tool--import"
+                      onClick={() => importInputRef.current?.click()}
+                      title="Import a MusicXML file"
+                      type="button"
+                    >
+                      ↑ MusicXML
+                    </button>
+                    <input
+                      ref={importInputRef}
+                      accept=".xml,.musicxml,.mxl"
+                      aria-label="Import MusicXML file"
+                      id="import-musicxml-input"
+                      onChange={handleImportMusicXML}
+                      style={{ display: 'none' }}
+                      type="file"
+                    />
                   </div>
                 </>
               ) : null}

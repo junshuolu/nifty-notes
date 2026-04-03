@@ -98,6 +98,8 @@ export const SYSTEM_LEFT = 52
 export const SYSTEM_TOP = 116
 export const SYSTEM_GAP_Y = 232
 export const GRAND_STAFF_GAP = 104
+/** Pixels from top of VexFlow score to first treble stave (must match App layout). */
+export const SCORE_CANVAS_TOP = 96
 export const SYSTEM_WRAP_WIDTH = 1120
 export const SYSTEM_SIDE_PADDING = 36
 export const SYSTEM_FIRST_MEASURE_WIDTH = 252
