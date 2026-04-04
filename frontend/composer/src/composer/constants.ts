@@ -24,7 +24,15 @@ export type AccidentalType = '#' | 'b' | 'n'
 export type ArticulationType = 'staccato' | 'staccatissimo' | 'tenuto' | 'portato' | 'marcato' | 'accent'
 export type OrnamentType = 'trill' | 'turn' | 'turnInverted' | 'mordent' | 'mordentInverted'
 export type DynamicType = 'ppp' | 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' | 'fff' | 'sfz' | 'fz' | 'fp' | 'pf'
-export type ToolbarTab = 'notes' | 'articulations' | 'ornaments' | 'dynamics' | 'bars' | 'text' | 'gallery'
+export type ToolbarTab =
+  | 'notes'
+  | 'articulations'
+  | 'ornaments'
+  | 'dynamics'
+  | 'bars'
+  | 'text'
+  | 'gallery'
+  | 'export'
 
 export const MAX_UNDO_HISTORY = 50
 

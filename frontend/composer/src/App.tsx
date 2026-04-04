@@ -117,6 +117,7 @@ const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'bars', label: 'Measures', hint: 'Manage bars, meter, playback demo, and reset tools.' },
   { id: 'text', label: 'Text', hint: 'Edit score title fields and lyrics for the selected note.' },
   { id: 'gallery', label: '🎹 Gallery', hint: 'Load a piano masterpiece and start editing it.' },
+  { id: 'export', label: 'Export', hint: 'Save the score as PDF or MusicXML, or import MusicXML.' },
 ]
 
 const ARTICULATION_OPTIONS: Array<{
@@ -189,6 +190,7 @@ const TAB_SELECTION_HINT: Record<Exclude<ToolbarTab, 'notes'>, string> = {
   articulations: 'Click an existing note while this tab is open to select it.',
   bars: 'Click a bar in the score to target it, then set a tempo mark from the Measures toolbar.',
   dynamics: 'Click an existing note to choose where the dynamic marking should appear.',
+  export: 'Use the buttons below to export or import files — no note selection needed.',
   gallery: 'Click a demo card to load that piece as your score.',
   ornaments: 'Click an existing note to add or remove an ornament.',
   text: 'Click an existing note to attach lyrics, or edit the score title block below.',
@@ -227,6 +229,11 @@ const TAB_SIDEBAR_TIPS: Record<ToolbarTab, string[]> = {
   text: [
     'Select a note to edit its lyric text, then apply or clear the lyric from the toolbar.',
     'The title, subtitle, composer, lyricist, and arranger fields are editable directly above the score.',
+  ],
+  export: [
+    'Export PDF opens a filename dialog, then rasterizes the on-screen score into paginated A4.',
+    'Export MusicXML writes the current measures, meter, and key to a standard .musicxml file.',
+    'Import MusicXML replaces the score from a .xml / .musicxml file (MXL zip is not expanded here).',
   ],
 }
 
@@ -3574,7 +3581,8 @@ function App() {
         setStatus(`MusicXML saved as "${safeName}.musicxml".`)
       } catch (err) {
         console.error('Export MusicXML failed:', err)
-        setStatus('Failed to export MusicXML.')
+        const detail = err instanceof Error ? err.message : String(err)
+        setStatus(`Failed to export MusicXML: ${detail}`)
       }
     } else {
       if (isExporting) return
@@ -3626,6 +3634,11 @@ function App() {
         setStatus('Failed to read file.')
         return
       }
+      if (text.startsWith('PK')) {
+        setStatus('This file looks like a compressed .mxl (ZIP). Please extract the .xml inside, or export plain .musicxml from your editor.')
+        return
+      }
+
       const result = importMusicXML(text)
 
       if (result.error) {
@@ -3667,8 +3680,10 @@ function App() {
       if (result.arranger) setScoreArranger(result.arranger)
 
       setHelpCard(getToolbarTabHelp('notes'))
+      const warn =
+        result.warnings && result.warnings.length > 0 ? ` (${result.warnings.join(' ')})` : ''
       setStatus(
-        `Imported "${result.title || file.name}" — ${result.measures.length} bar(s), ${result.timeSignature}, ${result.tempoBpm} BPM.`,
+        `Imported "${result.title || file.name}" — ${result.measures.length} bar(s), ${result.timeSignature}, ${result.tempoBpm} BPM.${warn}`,
       )
     }
 
@@ -4014,48 +4029,6 @@ function App() {
                       Clear
                     </button>
                   </div>
-
-                  <div className="tool-group compact">
-                    <span className="group-label">Export</span>
-                    <button
-                      className="tool tool--io"
-                      disabled={isExporting}
-                      onClick={handleExportPDF}
-                      title="Export score as PDF"
-                      type="button"
-                    >
-                      {isExporting ? '…' : '↓ PDF'}
-                    </button>
-                    <button
-                      className="tool tool--io"
-                      onClick={handleExportMusicXML}
-                      title="Export score as MusicXML"
-                      type="button"
-                    >
-                      ↓ MusicXML
-                    </button>
-                  </div>
-
-                  <div className="tool-group compact">
-                    <span className="group-label">Import</span>
-                    <button
-                      className="tool tool--io tool--import"
-                      onClick={() => importInputRef.current?.click()}
-                      title="Import a MusicXML file"
-                      type="button"
-                    >
-                      ↑ MusicXML
-                    </button>
-                    <input
-                      ref={importInputRef}
-                      accept=".xml,.musicxml,.mxl"
-                      aria-label="Import MusicXML file"
-                      id="import-musicxml-input"
-                      onChange={handleImportMusicXML}
-                      style={{ display: 'none' }}
-                      type="file"
-                    />
-                  </div>
                 </>
               ) : null}
 
@@ -4211,6 +4184,52 @@ function App() {
                     ))}
                   </div>
                 </div>
+              ) : null}
+
+              {activeTab === 'export' ? (
+                <>
+                  <div className="tool-group compact">
+                    <span className="group-label">Export</span>
+                    <button
+                      className="tool tool--io"
+                      disabled={isExporting}
+                      onClick={handleExportPDF}
+                      title="Export score as PDF"
+                      type="button"
+                    >
+                      {isExporting ? '…' : '↓ PDF'}
+                    </button>
+                    <button
+                      className="tool tool--io"
+                      onClick={handleExportMusicXML}
+                      title="Export score as MusicXML"
+                      type="button"
+                    >
+                      ↓ MusicXML
+                    </button>
+                  </div>
+
+                  <div className="tool-group compact">
+                    <span className="group-label">Import</span>
+                    <button
+                      className="tool tool--io tool--import"
+                      onClick={() => importInputRef.current?.click()}
+                      title="Import a MusicXML file"
+                      type="button"
+                    >
+                      ↑ MusicXML
+                    </button>
+                    <input
+                      ref={importInputRef}
+                      accept=".xml,.musicxml,.mxl"
+                      aria-label="Import MusicXML file"
+                      id="import-musicxml-input"
+                      onChange={handleImportMusicXML}
+                      style={{ display: 'none' }}
+                      type="file"
+                    />
+                  </div>
+                </>
               ) : null}
             </div>
           </div>
