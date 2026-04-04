@@ -423,10 +423,6 @@ function toScoreItem(
   return n
 }
 
-function staffNumToId(n: 1 | 2): StaffId {
-  return n === 1 ? 'treble' : 'bass'
-}
-
 function resolveTies(measures: MeasureData[], subdivisionsPerMeasure: number) {
   const walkStaff = (staff: StaffId) => {
     for (let mi = 0; mi < measures.length; mi++) {
@@ -592,7 +588,7 @@ export function importMusicXML(xmlString: string): MusicXMLImportResult {
   const keySignature = FIFTHS_TO_KEY[state.fifths] ?? 'C'
   const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
 
-  const measures: MeasureData[] = rawMeasures.map((raw, index) => ({
+  const measures: MeasureData[] = rawMeasures.map((raw) => ({
     id: generateId(),
     tempoBpm: null,
     trebleItems: raw.treble,
