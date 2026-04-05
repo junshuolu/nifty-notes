@@ -1,4 +1,4 @@
-export type BaseDuration = 'w' | 'h' | 'q' | '8' | '16'
+export type BaseDuration = 'w' | 'h' | 'q' | '8' | '16' | '32'
 export type RenderDuration = BaseDuration | '32'
 export type EditMode = 'note' | 'rest' | 'tie' | 'slur' | 'erase'
 export type NotePitch = string
@@ -150,6 +150,7 @@ export const DURATION_OPTIONS: Array<{
   { baseDuration: 'q', dots: 0, label: 'Quarter', previewClass: 'quarter' },
   { baseDuration: '8', dots: 0, label: 'Eighth', previewClass: 'eighth' },
   { baseDuration: '16', dots: 0, label: 'Sixteenth', previewClass: 'sixteenth' },
+  { baseDuration: '32', dots: 0, label: 'Thirty-second', previewClass: 'thirty-second' },
 ]
 
 export const PLACEHOLDER_DURATIONS: RenderDuration[] = ['w', 'h', 'q', '8', '16', '32']

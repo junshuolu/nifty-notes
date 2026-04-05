@@ -26,11 +26,14 @@ export function CursorPreview({
       >
         <span className="cursor-head" />
         {baseDuration !== 'w' ? <span className="cursor-stem" /> : null}
-        {baseDuration === '8' || baseDuration === '16' ? (
+        {baseDuration === '8' || baseDuration === '16' || baseDuration === '32' ? (
           <span className="cursor-flag cursor-flag--1" />
         ) : null}
-        {baseDuration === '16' ? (
+        {baseDuration === '16' || baseDuration === '32' ? (
           <span className="cursor-flag cursor-flag--2" />
+        ) : null}
+        {baseDuration === '32' ? (
+          <span className="cursor-flag cursor-flag--3" />
         ) : null}
         {dotted ? <span className="cursor-dot" /> : null}
       </div>

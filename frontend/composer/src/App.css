@@ -280,6 +280,11 @@
   top: 10px;
 }
 
+.tool-glyph__flag--3,
+.dot-glyph__flag--3 {
+  top: 18px;
+}
+
 .tool-glyph__dot,
 .dot-glyph__dot {
   position: absolute;
@@ -645,6 +650,10 @@
 
 .cursor-flag--2 {
   top: 14px;
+}
+
+.cursor-flag--3 {
+  top: 25px;
 }
 
 .cursor-dot {

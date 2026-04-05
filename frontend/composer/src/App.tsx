@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import type { ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
 import * as Tone from 'tone'
 import {
   Accidental as VFAccidental,
@@ -95,7 +95,7 @@ import {
 import { createFurEliseMeasures } from './composer/furElise'
 import { createRainMeasures, RAIN_META } from './composer/demos/rain'
 import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
-import { exportPDF } from './composer/io'
+import { exportMusicXML, exportPDF, importMusicXMLViaBackend, type MusicXmlScorePayload } from './composer/io'
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
 const NOTE_VISUAL_SHIFT = 4
@@ -248,6 +248,10 @@ const DURATION_HELP: Record<BaseDuration, { description: string; title: string }
   '16': {
     description: 'A sixteenth note fills a quarter of a beat and is useful for fast ornamental or rhythmic detail.',
     title: 'Sixteenth Note',
+  },
+  '32': {
+    description: 'A thirty-second note fills one eighth of a beat and is useful for very fast ornamental figures.',
+    title: 'Thirty-second Note',
   },
   h: {
     description: 'A half note spans two beats and now highlights long empty rests the same way as shorter values.',
@@ -1118,11 +1122,14 @@ function buildDurationGlyph(
     <span className={`${className} ${className}--${baseDuration}`}>
       <span className={`${className}__head`} />
       {baseDuration !== 'w' ? <span className={`${className}__stem`} /> : null}
-      {baseDuration === '8' || baseDuration === '16' ? (
+      {baseDuration === '8' || baseDuration === '16' || baseDuration === '32' ? (
         <span className={`${className}__flag ${className}__flag--1`} />
       ) : null}
-      {baseDuration === '16' ? (
+      {baseDuration === '16' || baseDuration === '32' ? (
         <span className={`${className}__flag ${className}__flag--2`} />
+      ) : null}
+      {baseDuration === '32' ? (
+        <span className={`${className}__flag ${className}__flag--3`} />
       ) : null}
       {dotted ? <span className={`${className}__dot`} /> : null}
     </span>
@@ -1189,7 +1196,7 @@ function getPreviewExtents(
 ) {
   return getNoteExtents(
     getDurationSubdivisions(previewBaseDuration, previewDotted),
-    previewBaseDuration === '8' || previewBaseDuration === '16',
+    previewBaseDuration === '8' || previewBaseDuration === '16' || previewBaseDuration === '32',
     previewDotted,
   )
 }
@@ -1227,7 +1234,7 @@ function clampPreviewX(
     previewDotted,
   )
 
-  const offset = previewBaseDuration === '16' ? -6 : 0
+  const offset = previewBaseDuration === '32' ? -10 : previewBaseDuration === '16' ? -6 : 0
 
   return Math.min(
     measureRight - right - MEASURE_EDGE_PADDING,
@@ -1471,8 +1478,10 @@ function App() {
   const [timeSignatureGroupingInput, setTimeSignatureGroupingInput] = useState('')
   const [helpCard, setHelpCard] = useState<HelpCard | null>(null)
   const [isExporting, setIsExporting] = useState(false)
+  const [isImportingMusicXml, setIsImportingMusicXml] = useState(false)
   const [exportDialog, setExportDialog] = useState<{ filename: string } | null>(null)
   const exportFilenameInputRef = useRef<HTMLInputElement | null>(null)
+  const importMusicXmlInputRef = useRef<HTMLInputElement | null>(null)
 
   const meterDefinition = useMemo(
     () => parseTimeSignature(timeSignature, timeSignatureGrouping),
@@ -3578,6 +3587,117 @@ function App() {
     setHoveredRestPosition(null)
   }
 
+  function applyImportedMusicXml(payload: MusicXmlScorePayload) {
+    const importedMeter = parseTimeSignature(
+      payload.timeSignature,
+      payload.timeSignatureGrouping,
+    )
+
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    setTimeSignature(importedMeter.display)
+    setTimeSignatureGrouping(payload.timeSignatureGrouping)
+    setKeySignature(payload.keySignature)
+    setMeasures(
+      normalizeMeasures(payload.measures, importedMeter.subdivisionsPerMeasure),
+    )
+    setSlurs(
+      payload.slurs.map((slur) => ({
+        ...slur,
+        id: slur.id ?? generateId(),
+      })),
+    )
+    setTempoBpm(payload.tempoBpm)
+    setMeasureTempoInput(String(payload.tempoBpm))
+    setTimeSignatureNumeratorInput(String(importedMeter.numerator))
+    setTimeSignatureDenominatorInput(String(importedMeter.denominator) as '2' | '4' | '8' | '16')
+    setTimeSignatureGroupingInput(
+      payload.timeSignatureGrouping?.join('+') ?? '',
+    )
+    clearPendingInsertPreview()
+    setPendingSlurSelection(null)
+    setScoreFrontPopover(null)
+    setActiveMeasureIndex(0)
+    setBaseDuration('8')
+    setActiveTab('notes')
+    setHelpCard(getToolbarTabHelp('notes'))
+    setMode('note')
+    setActiveItemId(null)
+    setLyricsInput('')
+    setScoreTitle(payload.scoreTitle)
+    setScoreSubtitle(payload.scoreSubtitle)
+    setScoreComposer(payload.scoreComposer)
+    setScoreLyricist(payload.scoreLyricist)
+    setScoreArranger(payload.scoreArranger)
+    clearHoverState()
+  }
+
+  function handleExportMusicXML() {
+    try {
+      exportMusicXML({
+        keySignature,
+        measures,
+        scoreArranger,
+        scoreComposer,
+        scoreLyricist,
+        scoreSubtitle,
+        scoreTitle,
+        slurs,
+        tempoBpm,
+        timeSignature,
+        timeSignatureGrouping,
+      })
+      setStatus('MusicXML downloaded successfully.')
+    } catch (err) {
+      console.error('Export MusicXML failed:', err)
+      setStatus('Failed to export MusicXML.')
+    }
+  }
+
+  function handleImportMusicXMLClick() {
+    if (isImportingMusicXml) return
+    importMusicXmlInputRef.current?.click()
+  }
+
+  async function handleImportMusicXMLFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file || isImportingMusicXml) {
+      return
+    }
+
+    setIsImportingMusicXml(true)
+    setStatus(`Importing "${file.name}"...`)
+
+    try {
+      const xml = await file.text()
+      const payload = await importMusicXMLViaBackend(xml)
+      applyImportedMusicXml(payload)
+      const warningSuffix =
+        payload.warnings && payload.warnings.length > 0
+          ? ` Imported with ${payload.warnings.length} warning(s); see console for details.`
+          : ''
+
+      if (payload.warnings && payload.warnings.length > 0) {
+        console.warn('MusicXML import warnings:', payload.warnings)
+      }
+
+      setStatus(`Imported "${file.name}" successfully.${warningSuffix}`)
+    } catch (err) {
+      console.error('Import MusicXML failed:', err)
+      setStatus(
+        err instanceof Error
+          ? `Failed to import MusicXML: ${err.message}`
+          : 'Failed to import MusicXML.',
+      )
+    } finally {
+      setIsImportingMusicXml(false)
+    }
+  }
+
   function handleExportPDF() {
     if (isExporting) return
     const defaultName = (scoreTitle || 'score').replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
@@ -3630,6 +3750,13 @@ function App() {
 
   return (
     <div className="app-shell">
+      <input
+        ref={importMusicXmlInputRef}
+        accept=".musicxml,.xml,application/xml,text/xml"
+        hidden
+        onChange={handleImportMusicXMLFile}
+        type="file"
+      />
       {exportDialog && (
         <div
           className="export-dialog-overlay"
@@ -4115,10 +4242,28 @@ function App() {
 
               {activeTab === 'export' ? (
                 <div className="tool-group compact">
-                  <span className="group-label">Export</span>
+                  <span className="group-label">Import / Export</span>
                   <button
                     className="tool tool--io"
-                    disabled={isExporting}
+                    disabled={isImportingMusicXml}
+                    onClick={handleImportMusicXMLClick}
+                    title="Import MusicXML via backend parser"
+                    type="button"
+                  >
+                    {isImportingMusicXml ? '...' : 'Import XML'}
+                  </button>
+                  <button
+                    className="tool tool--io"
+                    disabled={isImportingMusicXml}
+                    onClick={handleExportMusicXML}
+                    title="Export score as MusicXML"
+                    type="button"
+                  >
+                    XML
+                  </button>
+                  <button
+                    className="tool tool--io"
+                    disabled={isExporting || isImportingMusicXml}
                     onClick={handleExportPDF}
                     title="Export score as PDF"
                     type="button"

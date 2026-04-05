@@ -392,3 +392,582 @@ export async function exportPDF(params: {
 
   pdf.save(`${safeName}.pdf`)
 }
+
+export type MusicXmlScoreSlur = {
+  fromNoteId: string
+  id?: string
+  staffId: StaffId
+  toNoteId: string
+}
+
+export type MusicXmlScorePayload = {
+  keySignature: KeySignatureSpec
+  measures: MeasureData[]
+  scoreArranger: string
+  scoreComposer: string
+  scoreLyricist: string
+  scoreSubtitle: string
+  scoreTitle: string
+  slurs: MusicXmlScoreSlur[]
+  tempoBpm: number
+  timeSignature: TimeSignature
+  timeSignatureGrouping: number[] | null
+  warnings?: string[]
+}
+
+const MUSICXML_DIVISIONS = 8
+const MUSICXML_TYPE_BY_DURATION: Record<BaseDuration, string> = {
+  '8': 'eighth',
+  '16': '16th',
+  '32': '32nd',
+  h: 'half',
+  q: 'quarter',
+  w: 'whole',
+}
+
+const MUSICXML_DURATION_CHOICES: Array<{
+  baseDuration: BaseDuration
+  dots: 0 | 1
+  subdivisions: number
+}> = [
+  { baseDuration: 'w', dots: 1, subdivisions: 48 },
+  { baseDuration: 'w', dots: 0, subdivisions: 32 },
+  { baseDuration: 'h', dots: 1, subdivisions: 24 },
+  { baseDuration: 'h', dots: 0, subdivisions: 16 },
+  { baseDuration: 'q', dots: 1, subdivisions: 12 },
+  { baseDuration: 'q', dots: 0, subdivisions: 8 },
+  { baseDuration: '8', dots: 1, subdivisions: 6 },
+  { baseDuration: '8', dots: 0, subdivisions: 4 },
+  { baseDuration: '16', dots: 1, subdivisions: 3 },
+  { baseDuration: '16', dots: 0, subdivisions: 2 },
+  { baseDuration: '32', dots: 0, subdivisions: 1 },
+]
+
+const KEY_SIGNATURE_TO_FIFTHS: Record<KeySignatureSpec, number> = {
+  A: 3,
+  Ab: -4,
+  B: 5,
+  Bb: -2,
+  C: 0,
+  'C#': 7,
+  Cb: -7,
+  D: 2,
+  Db: -5,
+  E: 4,
+  Eb: -3,
+  F: -1,
+  'F#': 6,
+  Gb: -6,
+  G: 1,
+}
+
+const ARTICULATION_TO_MUSICXML: Partial<Record<ArticulationType, string>> = {
+  accent: 'accent',
+  marcato: 'strong-accent type="up"',
+  portato: 'detached-legato',
+  staccatissimo: 'staccatissimo',
+  staccato: 'staccato',
+  tenuto: 'tenuto',
+}
+
+const ORNAMENT_TO_MUSICXML: Partial<Record<OrnamentType, string>> = {
+  mordent: 'mordent',
+  mordentInverted: 'inverted-mordent',
+  trill: 'trill-mark',
+  turn: 'turn',
+  turnInverted: 'inverted-turn',
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+}
+
+function downloadTextFile(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function getSafeScoreFilename(name: string, fallbackExtension: string): string {
+  const safeName = name.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
+  return `${safeName}.${fallbackExtension}`
+}
+
+function splitSubdivisions(subdivisions: number): Array<{ baseDuration: BaseDuration; dots: 0 | 1 }> {
+  let remaining = subdivisions
+  const chunks: Array<{ baseDuration: BaseDuration; dots: 0 | 1 }> = []
+
+  for (const choice of MUSICXML_DURATION_CHOICES) {
+    while (remaining >= choice.subdivisions) {
+      chunks.push({ baseDuration: choice.baseDuration, dots: choice.dots })
+      remaining -= choice.subdivisions
+    }
+  }
+
+  if (remaining !== 0) {
+    throw new Error(`Cannot encode a ${subdivisions}-subdivision span as MusicXML with the current duration set.`)
+  }
+
+  return chunks
+}
+
+function getGroupBoundaryAfter(
+  subdivision: number,
+  groupSubdivisionLengths: number[],
+  measureSubdivisions: number,
+): number {
+  let cursor = 0
+
+  for (const groupLength of groupSubdivisionLengths) {
+    cursor += groupLength
+    if (subdivision < cursor) {
+      return cursor
+    }
+  }
+
+  return measureSubdivisions
+}
+
+function splitSubdivisionsByGroups(
+  startSubdivision: number,
+  totalSubdivisions: number,
+  groupSubdivisionLengths: number[],
+  measureSubdivisions: number,
+): Array<{ baseDuration: BaseDuration; dots: 0 | 1 }> {
+  if (totalSubdivisions <= 0) {
+    return []
+  }
+
+  const chunks: Array<{ baseDuration: BaseDuration; dots: 0 | 1 }> = []
+  let cursor = startSubdivision
+  let remaining = totalSubdivisions
+
+  while (remaining > 0) {
+    const nextBoundary = getGroupBoundaryAfter(
+      cursor,
+      groupSubdivisionLengths,
+      measureSubdivisions,
+    )
+    const segmentLength = Math.min(remaining, nextBoundary - cursor)
+    chunks.push(...splitSubdivisions(segmentLength))
+    cursor += segmentLength
+    remaining -= segmentLength
+  }
+
+  return chunks
+}
+
+function buildTieStopMap(
+  measures: MeasureData[],
+  timeSignature: TimeSignature,
+) {
+  const stopTargets = new Set<string>()
+  const subdivisionsPerMeasure = parseTimeSignature(timeSignature).subdivisionsPerMeasure
+
+  measures.forEach((measure, measureIndex) => {
+    STAFF_IDS.forEach((staffId) => {
+      getItemsForStaff(measure, staffId).forEach((item) => {
+        if (item.kind !== 'note' || !item.tieToNext) {
+          return
+        }
+
+        const next = findNextContiguousItem(
+          measures,
+          measureIndex,
+          staffId,
+          item,
+          subdivisionsPerMeasure,
+        )
+
+        if (
+          next?.item.kind === 'note' &&
+          haveSamePitches(item.pitches, next.item.pitches)
+        ) {
+          stopTargets.add(next.item.id)
+        }
+      })
+    })
+  })
+
+  return stopTargets
+}
+
+function buildSlurMaps(slurs: MusicXmlScoreSlur[]) {
+  const startMap = new Map<string, number[]>()
+  const stopMap = new Map<string, number[]>()
+
+  slurs.forEach((slur, index) => {
+    const number = (index % 6) + 1
+    startMap.set(slur.fromNoteId, [...(startMap.get(slur.fromNoteId) ?? []), number])
+    stopMap.set(slur.toNoteId, [...(stopMap.get(slur.toNoteId) ?? []), number])
+  })
+
+  return { startMap, stopMap }
+}
+
+function getAccidentalTag(
+  note: NoteItem,
+  pitch: string,
+): string | null {
+  const explicit = note.accidentals?.[pitch]
+  if (explicit === '#') return 'sharp'
+  if (explicit === 'b') return 'flat'
+  if (explicit === 'n') return 'natural'
+
+  const { xmlAlter } = parsePitchToken(pitch)
+  if (xmlAlter === 2) return 'double-sharp'
+  if (xmlAlter === -2) return 'flat-flat'
+  return null
+}
+
+function pushTempoDirection(lines: string[], bpm: number) {
+  lines.push('      <direction placement="above">')
+  lines.push('        <direction-type>')
+  lines.push('          <metronome>')
+  lines.push('            <beat-unit>quarter</beat-unit>')
+  lines.push(`            <per-minute>${Math.round(bpm)}</per-minute>`)
+  lines.push('          </metronome>')
+  lines.push('        </direction-type>')
+  lines.push(`        <sound tempo="${Math.round(bpm)}"/>`)
+  lines.push('        <staff>1</staff>')
+  lines.push('      </direction>')
+}
+
+function pushDynamicDirection(lines: string[], dynamic: DynamicType, staffNumber: 1 | 2) {
+  lines.push('      <direction placement="below">')
+  lines.push('        <direction-type>')
+  lines.push('          <dynamics>')
+  lines.push(`            <${dynamic}/>`)
+  lines.push('          </dynamics>')
+  lines.push('        </direction-type>')
+  lines.push(`        <staff>${staffNumber}</staff>`)
+  lines.push('      </direction>')
+}
+
+function pushRestNote(
+  lines: string[],
+  baseDuration: BaseDuration,
+  dots: 0 | 1,
+  staffNumber: 1 | 2,
+) {
+  lines.push('      <note>')
+  lines.push('        <rest/>')
+  lines.push(`        <duration>${getItemSubdivisions({ baseDuration, dots, id: 'rest', kind: 'rest', start: 0 })}</duration>`)
+  lines.push('        <voice>1</voice>')
+  lines.push(`        <type>${MUSICXML_TYPE_BY_DURATION[baseDuration]}</type>`)
+  if (dots === 1) {
+    lines.push('        <dot/>')
+  }
+  lines.push(`        <staff>${staffNumber}</staff>`)
+  lines.push('      </note>')
+}
+
+function pushNoteItem(
+  lines: string[],
+  item: NoteItem,
+  staffNumber: 1 | 2,
+  tieStops: Set<string>,
+  slurStarts: Map<string, number[]>,
+  slurStops: Map<string, number[]>,
+) {
+  const tieStop = tieStops.has(item.id)
+  const slurStartNumbers = slurStarts.get(item.id) ?? []
+  const slurStopNumbers = slurStops.get(item.id) ?? []
+  const articulationTag = item.articulation ? ARTICULATION_TO_MUSICXML[item.articulation] : null
+  const ornamentTag = item.ornament ? ORNAMENT_TO_MUSICXML[item.ornament] : null
+
+  item.pitches.forEach((pitch, index) => {
+    const { letter, octave, xmlAlter } = parsePitchToken(pitch)
+    const accidentalTag = getAccidentalTag(item, pitch)
+
+    lines.push('      <note>')
+    if (index > 0) {
+      lines.push('        <chord/>')
+    }
+    lines.push('        <pitch>')
+    lines.push(`          <step>${letter.toUpperCase()}</step>`)
+    if (xmlAlter !== 0) {
+      lines.push(`          <alter>${xmlAlter}</alter>`)
+    }
+    lines.push(`          <octave>${octave}</octave>`)
+    lines.push('        </pitch>')
+    lines.push(`        <duration>${getItemSubdivisions(item)}</duration>`)
+    lines.push('        <voice>1</voice>')
+    lines.push(`        <type>${MUSICXML_TYPE_BY_DURATION[item.baseDuration]}</type>`)
+    if (item.dots === 1) {
+      lines.push('        <dot/>')
+    }
+    if (tieStop) {
+      lines.push('        <tie type="stop"/>')
+    }
+    if (item.tieToNext) {
+      lines.push('        <tie type="start"/>')
+    }
+    if (accidentalTag) {
+      lines.push(`        <accidental>${accidentalTag}</accidental>`)
+    }
+    lines.push(`        <staff>${staffNumber}</staff>`)
+
+    if (index === 0 && item.lyrics) {
+      lines.push('        <lyric>')
+      lines.push(`          <text>${escapeXml(item.lyrics)}</text>`)
+      lines.push('        </lyric>')
+    }
+
+    const hasNotations =
+      tieStop ||
+      item.tieToNext ||
+      slurStartNumbers.length > 0 ||
+      slurStopNumbers.length > 0 ||
+      Boolean(articulationTag) ||
+      Boolean(ornamentTag)
+
+    if (hasNotations) {
+      lines.push('        <notations>')
+      if (tieStop) {
+        lines.push('          <tied type="stop"/>')
+      }
+      if (item.tieToNext) {
+        lines.push('          <tied type="start"/>')
+      }
+      slurStopNumbers.forEach((number) => {
+        lines.push(`          <slur type="stop" number="${number}"/>`)
+      })
+      slurStartNumbers.forEach((number) => {
+        lines.push(`          <slur type="start" number="${number}"/>`)
+      })
+      if (articulationTag) {
+        lines.push('          <articulations>')
+        if (articulationTag.includes(' ')) {
+          const [tagName, attrs] = articulationTag.split(' ', 2)
+          lines.push(`            <${tagName} ${attrs}/>`)
+        } else {
+          lines.push(`            <${articulationTag}/>`)
+        }
+        lines.push('          </articulations>')
+      }
+      if (ornamentTag) {
+        lines.push('          <ornaments>')
+        lines.push(`            <${ornamentTag}/>`)
+        lines.push('          </ornaments>')
+      }
+      lines.push('        </notations>')
+    }
+
+    lines.push('      </note>')
+  })
+}
+
+function pushStaffContents(
+  lines: string[],
+  measure: MeasureData,
+  staffId: StaffId,
+  measureSubdivisions: number,
+  groupSubdivisionLengths: number[],
+  tieStops: Set<string>,
+  slurStarts: Map<string, number[]>,
+  slurStops: Map<string, number[]>,
+) {
+  const staffNumber = staffId === 'treble' ? 1 : 2
+  const items = [...getItemsForStaff(measure, staffId)].sort((left, right) => left.start - right.start)
+  let cursor = 0
+
+  for (const item of items) {
+    if (item.start > cursor) {
+      const padding = splitSubdivisionsByGroups(
+        cursor,
+        item.start - cursor,
+        groupSubdivisionLengths,
+        measureSubdivisions,
+      )
+      padding.forEach((chunk) => pushRestNote(lines, chunk.baseDuration, chunk.dots, staffNumber))
+      cursor = item.start
+    }
+
+    if (item.kind === 'note' && item.dynamic) {
+      pushDynamicDirection(lines, item.dynamic, staffNumber)
+    }
+
+    if (item.kind === 'note') {
+      pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops)
+    } else {
+      pushRestNote(lines, item.baseDuration, item.dots, staffNumber)
+    }
+    cursor = item.start + getItemSubdivisions(item)
+  }
+
+  if (cursor < measureSubdivisions) {
+    splitSubdivisionsByGroups(
+      cursor,
+      measureSubdivisions - cursor,
+      groupSubdivisionLengths,
+      measureSubdivisions,
+    ).forEach((chunk) => pushRestNote(lines, chunk.baseDuration, chunk.dots, staffNumber))
+  }
+}
+
+function buildMusicXmlDocument(payload: MusicXmlScorePayload): string {
+  const { measures, keySignature, scoreArranger, scoreComposer, scoreLyricist, scoreSubtitle, scoreTitle, slurs, tempoBpm, timeSignature } = payload
+  const { startMap: slurStarts, stopMap: slurStops } = buildSlurMaps(slurs)
+  const tieStops = buildTieStopMap(measures, timeSignature)
+  const meter = parseTimeSignature(timeSignature, payload.timeSignatureGrouping)
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">',
+    '<score-partwise version="4.0">',
+  ]
+
+  if (scoreTitle.trim()) {
+    lines.push(`  <movement-title>${escapeXml(scoreTitle.trim())}</movement-title>`)
+  }
+
+  const credits = [
+    scoreSubtitle.trim(),
+    scoreComposer.trim() ? `Composer: ${scoreComposer.trim()}` : '',
+    scoreLyricist.trim() ? `Lyricist: ${scoreLyricist.trim()}` : '',
+    scoreArranger.trim() ? `Arranger: ${scoreArranger.trim()}` : '',
+  ].filter(Boolean)
+
+  credits.forEach((credit, index) => {
+    lines.push('  <credit>')
+    lines.push(`    <credit-words default-y="${1450 - index * 60}">${escapeXml(credit)}</credit-words>`)
+    lines.push('  </credit>')
+  })
+
+  if (scoreComposer.trim() || scoreLyricist.trim() || scoreArranger.trim()) {
+    lines.push('  <identification>')
+    if (scoreComposer.trim()) {
+      lines.push(`    <creator type="composer">${escapeXml(scoreComposer.trim())}</creator>`)
+    }
+    if (scoreLyricist.trim()) {
+      lines.push(`    <creator type="lyricist">${escapeXml(scoreLyricist.trim())}</creator>`)
+    }
+    if (scoreArranger.trim()) {
+      lines.push(`    <creator type="arranger">${escapeXml(scoreArranger.trim())}</creator>`)
+    }
+    lines.push('  </identification>')
+  }
+
+  lines.push('  <part-list>')
+  lines.push('    <score-part id="P1">')
+  lines.push('      <part-name>Piano</part-name>')
+  lines.push('    </score-part>')
+  lines.push('  </part-list>')
+  lines.push('  <part id="P1">')
+
+  measures.forEach((measure, index) => {
+    lines.push(`    <measure number="${index + 1}">`)
+
+    if (index === 0) {
+      lines.push('      <attributes>')
+      lines.push(`        <divisions>${MUSICXML_DIVISIONS}</divisions>`)
+      lines.push(`        <key><fifths>${KEY_SIGNATURE_TO_FIFTHS[keySignature]}</fifths></key>`)
+      lines.push(`        <time><beats>${meter.numerator}</beats><beat-type>${meter.denominator}</beat-type></time>`)
+      lines.push('        <staves>2</staves>')
+      lines.push('        <clef number="1"><sign>G</sign><line>2</line></clef>')
+      lines.push('        <clef number="2"><sign>F</sign><line>4</line></clef>')
+      lines.push('      </attributes>')
+    }
+
+    if (index === 0 || measure.tempoBpm !== null) {
+      pushTempoDirection(lines, index === 0 ? tempoBpm : (measure.tempoBpm ?? tempoBpm))
+    }
+
+    pushStaffContents(
+      lines,
+      measure,
+      'treble',
+      meter.subdivisionsPerMeasure,
+      meter.groupSubdivisionLengths,
+      tieStops,
+      slurStarts,
+      slurStops,
+    )
+
+    lines.push('      <backup>')
+    lines.push(`        <duration>${meter.subdivisionsPerMeasure}</duration>`)
+    lines.push('      </backup>')
+
+    pushStaffContents(
+      lines,
+      measure,
+      'bass',
+      meter.subdivisionsPerMeasure,
+      meter.groupSubdivisionLengths,
+      tieStops,
+      slurStarts,
+      slurStops,
+    )
+
+    lines.push('    </measure>')
+  })
+
+  lines.push('  </part>')
+  lines.push('</score-partwise>')
+  return lines.join('\n')
+}
+
+export function exportMusicXML(payload: MusicXmlScorePayload) {
+  const filename = getSafeScoreFilename(payload.scoreTitle || 'score', 'musicxml')
+  const document = buildMusicXmlDocument(payload)
+  downloadTextFile(filename, document, 'application/vnd.recordare.musicxml+xml;charset=utf-8')
+}
+
+export async function importMusicXMLViaBackend(xml: string): Promise<MusicXmlScorePayload> {
+  const response = await fetch('/api/musicxml/import', {
+    body: JSON.stringify({ xml }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  })
+
+  let payload: unknown = null
+  try {
+    payload = await response.json()
+  } catch {
+    payload = null
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof payload === 'object' &&
+      payload !== null &&
+      'error' in payload &&
+      typeof payload.error === 'string'
+        ? payload.error
+        : 'MusicXML import failed.'
+    throw new Error(message)
+  }
+
+  return payload as MusicXmlScorePayload
+}
+import {
+  STAFF_IDS,
+  type ArticulationType,
+  type BaseDuration,
+  type DynamicType,
+  type KeySignatureSpec,
+  type MeasureData,
+  type NoteItem,
+  type OrnamentType,
+  type StaffId,
+  type TimeSignature,
+} from './constants'
+import {
+  findNextContiguousItem,
+  getItemSubdivisions,
+  getItemsForStaff,
+  haveSamePitches,
+  parsePitchToken,
+  parseTimeSignature,
+} from './score'

@@ -173,8 +173,8 @@ export function getMeasureSubdivisions(timeSignature: TimeSignature): number {
   return parseTimeSignature(timeSignature).subdivisionsPerMeasure
 }
 
-export function canUseDot(_: BaseDuration): boolean {
-  return true
+export function canUseDot(baseDuration: BaseDuration): boolean {
+  return baseDuration !== '32'
 }
 
 export function getDurationSubdivisions(
