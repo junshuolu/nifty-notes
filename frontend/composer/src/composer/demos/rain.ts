@@ -1,6 +1,6 @@
-﻿/**
+/**
  * Rain and Your — Yiruma
- * Auto-generated from MusicXML.
+ * Demo score data.
  * Key: C. Time: 4/4. Tempo: 70 BPM.
  */
 

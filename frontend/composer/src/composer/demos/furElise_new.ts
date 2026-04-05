@@ -1,6 +1,6 @@
-﻿/**
+/**
  * Für Elise — Ludwig van Beethoven
- * Auto-generated from MusicXML.
+ * Demo score data.
  * Key: C. Time: 3/8. Tempo: 72 BPM.
  */
 

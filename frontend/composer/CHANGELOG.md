@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-06
+
+### PDF 导出
+
+- **交互**：**Export → ↓ PDF**，文件名对话框确认后浏览器本地下载 **A4 纵向分页 PDF**（`src/App.tsx`：工具栏、对话框；传入 `pdfSafeBreakYsSvg` 作为纵向分页提示）。
+- **渲染链**：选取 `.score-surface svg`（VexFlow）；按页设置 `viewBox` 切片，克隆节点并注入 Bravura `@font-face`，**canvg** 栅格化为 PNG，**jsPDF** 逐页嵌入；首页 **矢量页眉**（标题、副标题、Composer、Lyricist、Arranger，`drawVectorScoreHeader`）。
+- **分页策略**（`src/composer/io.ts`）  
+  - 导出 API：`exportPDF({ scoreTitle, overrideFilename?, pdfSafeBreakYsSvg?, pdfSystemBoundsSvg?, header?, scoreSvgSelector? })`。  
+  - 若提供 **`pdfSystemBoundsSvg`**（`PdfSystemBound[]`，各 system 的 `top`/`bottom`，SVG 用户坐标）：优先用 **`getBestCutPointBySystems`** 在相邻 system 之间的空白**中点**断页，减轻「下一系统碎片落在上一页末尾」。  
+  - **`buildGapCutPointsFromSystems`** 根据 system 边界生成间隙中点，与 `pdfSafeBreakYsSvg`、谱面底合并为 **`fallbackCutPoints`**；无可用 system 边界时仅用兜底逻辑 **`getBestCutPoint`**。  
+  - 当前 **`App.tsx`** 仅传 `pdfSafeBreakYsSvg`；`pdfSystemBoundsSvg` 预留，待渲染侧上报各 system 包围盒后即可启用。
+- **接缝与鲁棒性**：非首页切片 **顶 bleed**（`PDF_SLICE_BLEED_TOP_SVG`）；非末页 **底 shrink**（`PDF_SLICE_BOTTOM_SHRINK_SVG`）；非末页在已绘制 PNG 下沿叠加 **白色窄矩形**（`PDF_BOTTOM_MASK_MM`）弱化栅格接缝与抗锯齿杂边。
+
 ## 2026-03-31 (UI Refinement)
 
 ### Visual and Layout Adjustments
