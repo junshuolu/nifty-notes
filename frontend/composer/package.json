@@ -12,8 +12,10 @@
     "musicxml:server": "node server/musicxml-import-server.cjs"
   },
   "dependencies": {
+    "@tonejs/midi": "^2.0.28",
     "canvg": "^4.0.3",
     "jspdf": "^4.2.1",
+    "midi-writer-js": "^3.2.1",
     "opentype.js": "^1.3.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

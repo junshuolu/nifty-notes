@@ -13,6 +13,15 @@
   - 当前 **`App.tsx`** 仅传 `pdfSafeBreakYsSvg`；`pdfSystemBoundsSvg` 预留，待渲染侧上报各 system 包围盒后即可启用。
 - **接缝与鲁棒性**：非首页切片 **顶 bleed**（`PDF_SLICE_BLEED_TOP_SVG`）；非末页 **底 shrink**（`PDF_SLICE_BOTTOM_SHRINK_SVG`）；非末页在已绘制 PNG 下沿叠加 **白色窄矩形**（`PDF_BOTTOM_MASK_MM`）弱化栅格接缝与抗锯齿杂边。
 
+## 2026-04-04
+
+### Export MIDI 功能
+- 新增 `src/composer/exportMidi.ts`
+- 支持将当前作品导出为标准 MIDI 文件（.mid）
+- 高音谱表和低音谱表分双轨道导出
+- 支持所有音符时值（全音符到十六分音符）、附点、和弦、临时记号
+- 在 Measures tab 的 Score 区域添加了 Export MIDI 按钮
+
 ## 2026-03-31 (UI Refinement)
 
 ### Visual and Layout Adjustments

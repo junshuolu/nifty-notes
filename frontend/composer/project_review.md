@@ -21,6 +21,7 @@
 - Demo / Clear 按钮
 - useMemo 性能缓存
 - 回放（含临时记号半音处理）
+- MIDI 文件导出（双轨道，支持全部时值、附点、和弦、临时记号）
 - Tie 与 Slur
 - 谱面内标题、副标题与署名编辑
 - 静态部署
@@ -269,7 +270,7 @@ https://www.niftynotes.com.au/
 
 ## 目前仍然存在的限制
 
-- 暂时没有保存、导出和账号系统
+- 暂时没有保存和账号系统（已支持 MIDI 导出）
 - 调号不会自动重写已有音符的临时记号
 - `Slur` 目前限制在同一 staff、同一系统内
 - `7/8` 等不规则拍号已支持自定义分组，但还没有做成快捷预设按钮
@@ -350,6 +351,24 @@ https://www.niftynotes.com.au/
 - `SYSTEM_MEASURE_WIDTH` 从 182px 增加至 220px
 - 改善十六分音符密集排列时的间距和点击目标大小
 
+### 27. Export MIDI 功能
+
+问题：
+- 客户要求作品可以下载和导出（"downloadable and extractable"）
+- 之前只能在网页内播放，无法导出为可复用的音乐文件
+
+处理：
+- 新增 `src/composer/exportMidi.ts`
+- 使用 `midi-writer-js` 库在前端直接生成标准 MIDI 文件
+- 将 `MeasureData[]` 中的音符数据转换为 MIDI 事件：
+  - 音高转换：VexFlow 格式（如 `c/4`）→ MIDI 编号（如 `60`）
+  - 时值转换：baseDuration + dots → MIDI ticks（四分音符 = 480 ticks）
+  - 支持和弦（同一时间点多个 note_on）
+  - 支持临时记号（升号 +1 半音，降号 -1 半音）
+- 高音谱表和低音谱表分双轨道导出
+- 在 Measures tab 的 Score 区域添加 Export MIDI 按钮
+- 点击后自动下载 `composition.mid` 文件
+
 ## 关键文件（更新）
 
 | 文件 | 职责 |
@@ -359,6 +378,7 @@ https://www.niftynotes.com.au/
 | `src/composer/constants.ts` | 类型定义、常量、音域、拍号、调号、默认配置 |
 | `src/composer/score.ts` | 音高映射、时值换算、吸附、播放片段、拍号分组、布局系统 |
 | `src/composer/CursorPreview.tsx` | 鼠标悬停音符预览 |
+| `src/composer/exportMidi.ts` | MIDI 文件导出（midi-writer-js） |
 | `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（旧版手写 25 小节） |
 | `src/composer/demos/` | MXL 精确导入的 9 首钢琴名曲 demo 数据 |
 | `src/composer/demos/turkish.ts` | Turkish March（51 小节，2/4，130 BPM） |

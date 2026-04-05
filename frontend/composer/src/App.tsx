@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
 import * as Tone from 'tone'
+import { exportToMidi } from './composer/exportMidi'
 import {
   Accidental as VFAccidental,
   Annotation,
@@ -4081,6 +4082,12 @@ function App() {
                     </button>
                     <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
                       Clear
+                    </button>
+                    <button className="tool" onClick={() => exportToMidi(measures, timeSignature, tempoBpm)}
+                      title="Export MIDI"
+                      type="button"
+                      >
+                      Export MIDI
                     </button>
                   </div>
                 </>
