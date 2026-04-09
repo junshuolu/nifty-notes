@@ -25,9 +25,8 @@
 - Metronome 开关
 - 播放轨迹竖线
 - Tone.js 回放（含临时记号半音处理）
-- 内置 2 首钢琴名曲 demo（Gallery tab），从 MusicXML 精确导入
-- 🎹 Gallery 一键加载完整乐谱
-- MXL (MusicXML) → TypeScript 自动转换管线
+- 🎹 Gallery：一键加载内置名曲 demo 乐谱
+- **PDF 导出**：`Export` tab → 「↓ PDF」，本地下载 **A4 纵向分页 PDF**。谱面为 VexFlow SVG → 注入 Bravura → **canvg** 栅格化 → **jsPDF** 嵌入 PNG；首页可有标题/副标题/署名等矢量页眉。**分页**优先按各 **system** 的纵向范围在相邻行距**中点**断页（见 `io.ts` 中 `pdfSystemBoundsSvg` / `getBestCutPointBySystems`）；未提供 system 边界时回退为 `pdfSafeBreakYsSvg` 与谱面高度；非末页带顶 bleed、底 shrink 及窄条**白边遮罩**以减轻接缝。
 - 纯前端静态部署
 - 全局采用硬朗现代的无圆角（Square Corners）设计原则
 
@@ -166,7 +165,7 @@ http://localhost:5173
 
 ### 9. 🎹 Gallery（钢琴名曲库）
 
-点击工具栏的 `Gallery` tab，可以看到 9 首从 MusicXML 精确导入的钢琴名曲卡片：
+点击工具栏的 `Gallery` tab，可以看到 9 首钢琴名曲 demo 卡片：
 
 | 曲目 | 作曲家 | 拍号 | BPM | 调号 |
 |------|--------|------|-----|------|
@@ -182,14 +181,27 @@ http://localhost:5173
 
 点击任意卡片即可一键加载完整乐谱，自动设置标题、副标题、Composer、调号、拍号和 BPM，然后自动切换到 Notes tab 供用户编辑。
 
-### 10. Demo 和 Clear
+### 10. PDF 导出
+
+1. 打开 **`Export`** tab，点击 **↓ PDF**。
+2. 在对话框中输入文件名（无需扩展名），确认后浏览器下载 `.pdf`。
+3. **内容**：与当前屏幕上渲染的乐谱一致；多页时按分页算法切开 SVG 再逐页栅格化。
+4. **分页逻辑**（`src/composer/io.ts`）  
+   - 若调用方传入 **`pdfSystemBoundsSvg`**：`PdfSystemBound[]`，每项为某个 system 在 SVG 用户坐标系下的 `top` / `bottom`。优先在**相邻两个 system 之间的空隙中点**作为断页位置（`getBestCutPointBySystems`），减少「下一行系统碎片漏到上一页」。  
+   - 同时会把由 system 推导出的间隙中点与 **`pdfSafeBreakYsSvg`**（App 根据排版传入的纵向提示线）及谱面底部合并为**兜底切点**（`buildGapCutPointsFromSystems` + `getBestCutPoint`）。  
+   - 当前 **`App.tsx`** 传入 `pdfSafeBreakYsSvg`；`pdfSystemBoundsSvg` 可在后续接入渲染层提供的 system 包围盒后启用。
+5. **切片与接缝**：非首页切片向上带 **top bleed**；非末页对切片下沿做轻微 **bottom shrink**；除最后一页外，在已贴入的 PNG 下沿再画一条很窄的**白色填充矩形**（`PDF_BOTTOM_MASK_MM`），弱化栅格接缝与抗锯齿杂边。
+6. **页眉**：第一页可用矢量文字绘制标题、副标题、Composer / Lyricist / Arranger（与谱面上方信息一致，`drawVectorScoreHeader`）。
+7. **注意**：字体与站点需**同源**，否则 canvg 可能无法加载 Bravura；乐谱内容为位图嵌入 PDF，非矢量谱元。
+
+### 11. Demo 和 Clear
 
 - `🎹 Demo`：加载内置示范曲谱——致爱丽丝
 - `Clear`：清空所有音符（保留小节数量）
 
 打开网站时默认已加载致爱丽丝，可直接点 Play 试听。
 
-### 11. 添加新 demo 曲目
+### 12. 添加新 demo 曲目
 
 1. 用 MuseScore 打开钢琴谱 → 导出为 `.mxl`
 2. 将 `.mxl` 文件放入 `frontend/Piano sheet music/`
@@ -236,17 +248,18 @@ pm2 serve /root/nifty-notes/dist 3001 --name nifty-notes --spa
 
 | 文件 | 职责 |
 |------|------|
-| `src/App.tsx` | 主界面、交互逻辑、VexFlow 渲染、播放控制、score-front 热点与弹框、Gallery |
+| `src/App.tsx` | 主界面、交互逻辑、VexFlow 渲染、播放控制、score-front 热点与弹框、Gallery、PDF 导出对话框 |
+| `src/composer/io.ts` | **PDF 导出**：`exportPDF`、`ExportPdfHeader`、`PdfSystemBound`；SVG 切片、system 感知分页、canvg、jsPDF、矢量页眉、底部白边遮罩 |
 | `src/App.css` | 页面样式、左侧固定栏、右侧滚动区、toolbar、popover、gallery card 样式 |
 | `src/composer/constants.ts` | 常量、类型、音域、拍号、调号、默认配置 |
 | `src/composer/score.ts` | 音高映射、时值换算、分组拍号解析、吸附与播放片段生成 |
 | `src/composer/CursorPreview.tsx` | 鼠标悬停预览 |
 | `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（旧版手写 25 小节） |
-| `src/composer/demos/` | MXL 精确导入的 9 首钢琴名曲 demo 数据 |
+| `src/composer/demos/` | 9 首钢琴名曲 Gallery demo 数据 |
 | `project_review.md` | 当前阶段的项目回顾 |
 
 ## 已知限制
 
 - `Slur` 目前限制在同一 staff、同一系统内
 - `7/8` 等不规则拍号已支持自定义分组，但还没有做成快捷预设按钮
-- 没有保存、导出、账号系统或后端存储
+- 无云保存、账号或后端存储；乐谱仅能通过 **PDF** 本地下载，无专用工程文件格式

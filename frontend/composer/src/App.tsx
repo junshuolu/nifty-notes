@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import type { ChangeEvent, MouseEvent as ReactMouseEvent } from 'react'
 import * as Tone from 'tone'
 import {
   Accidental as VFAccidental,
@@ -32,6 +32,7 @@ import {
   MIN_BPM,
   NOTE_COLOR,
   PIANO_SAMPLE_URLS,
+  SCORE_CANVAS_TOP,
   SCORE_PADDING_BOTTOM,
   STAFF_IDS,
   SYSTEM_GAP_Y,
@@ -64,7 +65,6 @@ import {
 import {
   buildPlaybackNotes,
   buildSystems,
-  canUseDot,
   cloneMeasures,
   findCoveringItem,
   findNextContiguousItem,
@@ -95,6 +95,7 @@ import {
 import { createFurEliseMeasures } from './composer/furElise'
 import { createRainMeasures, RAIN_META } from './composer/demos/rain'
 import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
+import { exportMusicXML, exportPDF, importMusicXMLViaBackend, type MusicXmlScorePayload } from './composer/io'
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
 const NOTE_VISUAL_SHIFT = 4
@@ -102,10 +103,10 @@ const REST_VISUAL_SHIFT = 11
 const MEASURE_EDGE_PADDING = 3
 const GRID_EDGE_PADDING = 10
 const DEFAULT_GROUP_VISUAL_UNITS = 2
-const SCORE_FRONT_TIME_X = 56
 const SCORE_FRONT_TIME_WIDTH = 34
 const SCORE_FRONT_TIME_POPOVER_WIDTH = 392
 const SCORE_FRONT_HOTSPOT_HEIGHT = GRAND_STAFF_GAP + 62
+
 
 const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'notes', label: 'Notes', hint: 'Pitch, duration, accidentals, and insert tools.' },
@@ -115,6 +116,7 @@ const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'bars', label: 'Measures', hint: 'Manage bars, meter, playback demo, and reset tools.' },
   { id: 'text', label: 'Text', hint: 'Edit score title fields and lyrics for the selected note.' },
   { id: 'gallery', label: '🎹 Gallery', hint: 'Load a piano masterpiece and start editing it.' },
+  { id: 'export', label: 'Export', hint: 'Save the score as a PDF file.' },
 ]
 
 const ARTICULATION_OPTIONS: Array<{
@@ -187,6 +189,7 @@ const TAB_SELECTION_HINT: Record<Exclude<ToolbarTab, 'notes'>, string> = {
   articulations: 'Click an existing note while this tab is open to select it.',
   bars: 'Click a bar in the score to target it, then set a tempo mark from the Measures toolbar.',
   dynamics: 'Click an existing note to choose where the dynamic marking should appear.',
+  export: 'Use the button below to export the score as PDF — no note selection needed.',
   gallery: 'Click a demo card to load that piece as your score.',
   ornaments: 'Click an existing note to add or remove an ornament.',
   text: 'Click an existing note to attach lyrics, or edit the score title block below.',
@@ -226,6 +229,9 @@ const TAB_SIDEBAR_TIPS: Record<ToolbarTab, string[]> = {
     'Select a note to edit its lyric text, then apply or clear the lyric from the toolbar.',
     'The title, subtitle, composer, lyricist, and arranger fields are editable directly above the score.',
   ],
+  export: [
+    'Export PDF opens a filename dialog, then rasterizes the on-screen score into paginated A4.',
+  ],
 }
 
 const ACCIDENTAL_LABELS: Record<AccidentalType, string> = {
@@ -242,6 +248,10 @@ const DURATION_HELP: Record<BaseDuration, { description: string; title: string }
   '16': {
     description: 'A sixteenth note fills a quarter of a beat and is useful for fast ornamental or rhythmic detail.',
     title: 'Sixteenth Note',
+  },
+  '32': {
+    description: 'A thirty-second note fills one eighth of a beat and is useful for very fast ornamental figures.',
+    title: 'Thirty-second Note',
   },
   h: {
     description: 'A half note spans two beats and now highlights long empty rests the same way as shorter values.',
@@ -453,11 +463,6 @@ const KEY_SIGNATURE_HELP: Record<KeySignatureSpec, { description: string; title:
   'F#': { description: 'F-sharp major / D# minor uses six sharps in the key signature.', title: 'Key Signature: F#' },
   G: { description: 'G major / E minor uses one sharp in the key signature.', title: 'Key Signature: G' },
   Gb: { description: 'G-flat major / E-flat minor uses six flats in the key signature.', title: 'Key Signature: Gb' },
-}
-
-const DOTTED_HELP = {
-  description: 'Dot adds half of the base note value to the selected duration.',
-  title: 'Dotted Value',
 }
 
 const BAR_ACTION_HELP = {
@@ -1117,11 +1122,14 @@ function buildDurationGlyph(
     <span className={`${className} ${className}--${baseDuration}`}>
       <span className={`${className}__head`} />
       {baseDuration !== 'w' ? <span className={`${className}__stem`} /> : null}
-      {baseDuration === '8' || baseDuration === '16' ? (
+      {baseDuration === '8' || baseDuration === '16' || baseDuration === '32' ? (
         <span className={`${className}__flag ${className}__flag--1`} />
       ) : null}
-      {baseDuration === '16' ? (
+      {baseDuration === '16' || baseDuration === '32' ? (
         <span className={`${className}__flag ${className}__flag--2`} />
+      ) : null}
+      {baseDuration === '32' ? (
+        <span className={`${className}__flag ${className}__flag--3`} />
       ) : null}
       {dotted ? <span className={`${className}__dot`} /> : null}
     </span>
@@ -1188,7 +1196,7 @@ function getPreviewExtents(
 ) {
   return getNoteExtents(
     getDurationSubdivisions(previewBaseDuration, previewDotted),
-    previewBaseDuration === '8' || previewBaseDuration === '16',
+    previewBaseDuration === '8' || previewBaseDuration === '16' || previewBaseDuration === '32',
     previewDotted,
   )
 }
@@ -1226,7 +1234,7 @@ function clampPreviewX(
     previewDotted,
   )
 
-  const offset = previewBaseDuration === '16' ? -6 : 0
+  const offset = previewBaseDuration === '32' ? -10 : previewBaseDuration === '16' ? -6 : 0
 
   return Math.min(
     measureRight - right - MEASURE_EDGE_PADDING,
@@ -1414,7 +1422,10 @@ function PendingInsertIndicator({
 }
 
 function App() {
+  const [isToolbarExpanded, setIsToolbarExpanded] = useState(true)
   const scoreRef = useRef<HTMLDivElement | null>(null)
+  const scoreContainerRef = useRef<HTMLElement | null>(null)
+  const [availableScoreWidth, setAvailableScoreWidth] = useState(SYSTEM_WRAP_WIDTH)
   const tempoPanelRef = useRef<HTMLDivElement | null>(null)
   const hitBoxesRef = useRef<MeasureHitBox[]>([])
   const pianoRef = useRef<Tone.Sampler | null>(null)
@@ -1466,6 +1477,11 @@ function App() {
   const [timeSignatureDenominatorInput, setTimeSignatureDenominatorInput] = useState<'2' | '4' | '8' | '16'>('4')
   const [timeSignatureGroupingInput, setTimeSignatureGroupingInput] = useState('')
   const [helpCard, setHelpCard] = useState<HelpCard | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
+  const [isImportingMusicXml, setIsImportingMusicXml] = useState(false)
+  const [exportDialog, setExportDialog] = useState<{ filename: string } | null>(null)
+  const exportFilenameInputRef = useRef<HTMLInputElement | null>(null)
+  const importMusicXmlInputRef = useRef<HTMLInputElement | null>(null)
 
   const meterDefinition = useMemo(
     () => parseTimeSignature(timeSignature, timeSignatureGrouping),
@@ -1483,9 +1499,9 @@ function App() {
     () => getMeasureTempoTimeline(measures, timeSignature, tempoBpm),
     [measures, tempoBpm, timeSignature],
   )
-  const scoreTop = 96
+  const scoreTop = SCORE_CANVAS_TOP
   const scoreWidth = Math.max(
-    SYSTEM_WRAP_WIDTH,
+    availableScoreWidth,
     systems.reduce(
       (widest, system) =>
         Math.max(
@@ -1512,21 +1528,42 @@ function App() {
 
       const systemTop = scoreTop + systemIndex * SYSTEM_GAP_Y - 12
       const systemLeft = SYSTEM_SIDE_PADDING
+      const hotspots: ScoreFrontHotspot[] = []
 
-      return systemIndex === 0
-        ? [{
-            height: SCORE_FRONT_HOTSPOT_HEIGHT,
-            kind: 'timeSignature' as const,
-            left: systemLeft + SCORE_FRONT_TIME_X,
-            measureIndex: firstEntry.measureIndex,
-            top: systemTop,
-            width: SCORE_FRONT_TIME_WIDTH,
-          }]
-        : []
+      if (systemIndex === 0) {
+        const keySigWidth = keySignature === 'C' ? 15 : 35;
+
+        hotspots.push({
+          height: SCORE_FRONT_HOTSPOT_HEIGHT,
+          kind: 'keySignature' as const,
+          left: systemLeft + 35,
+          measureIndex: firstEntry.measureIndex,
+          top: systemTop,
+          width: keySigWidth,
+        })
+        hotspots.push({
+          height: SCORE_FRONT_HOTSPOT_HEIGHT,
+          kind: 'timeSignature' as const,
+          left: systemLeft + 35 + keySigWidth,
+          measureIndex: firstEntry.measureIndex,
+          top: systemTop,
+          width: SCORE_FRONT_TIME_WIDTH,
+        })
+      } else {
+        hotspots.push({
+          height: SCORE_FRONT_HOTSPOT_HEIGHT,
+          kind: 'timeSignature' as const,
+          left: systemLeft + 35,
+          measureIndex: firstEntry.measureIndex,
+          top: systemTop,
+          width: SCORE_FRONT_TIME_WIDTH,
+        })
+      }
+
+      return hotspots
     }),
-    [scoreTop, systems])
+    [keySignature, scoreTop, systems])
   const selectedDurationName = getDurationName(baseDuration, dotted)
-  const dotEnabled = canUseDot(baseDuration)
   const activeSelection = useMemo(() => {
     if (!activeItemId) {
       return null
@@ -1638,6 +1675,20 @@ function App() {
   }, [isTempoPanelOpen])
 
   useEffect(() => {
+    const container = scoreContainerRef.current
+    if (!container) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newWidth = Math.floor(entry.contentRect.width) - 48
+        setAvailableScoreWidth(Math.max(newWidth, 320))
+      }
+    })
+
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [isToolbarExpanded])
+  useEffect(() => {
     setLyricsInput(activeNote?.lyrics ?? '')
   }, [activeNote?.id, activeNote?.lyrics])
 
@@ -1739,30 +1790,46 @@ function App() {
     const noteRegistry = new Map<string, { item: NoteItem; note: StaveNote }>()
     const hitBoxes: MeasureHitBox[] = []
 
+    const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2;
+
     systems.forEach((system, systemIndex) => {
       let currentX = SYSTEM_SIDE_PADDING
       const trebleY = scoreTop + systemIndex * SYSTEM_GAP_Y
       const bassY = trebleY + GRAND_STAFF_GAP
 
+      const rawSystemWidth = system.reduce((sum, entry) => sum + entry.width, 0)
+      const isLastSystem = systemIndex === systems.length - 1
+      const widthMultiplier = (isLastSystem && rawSystemWidth < targetSystemWidth * 0.5) 
+        ? 1 
+        : targetSystemWidth / rawSystemWidth
+
       system.forEach((entry, measureInSystem) => {
         const isSystemStart = measureInSystem === 0
         const isFinalMeasure = entry.measureIndex === measures.length - 1
-        const trebleStave = new Stave(currentX, trebleY, entry.width)
-        const bassStave = new Stave(currentX, bassY, entry.width)
+
+        const adjustedWidth = entry.width * widthMultiplier
+        const trebleStave = new Stave(currentX, trebleY, adjustedWidth)
+        const bassStave = new Stave(currentX, bassY, adjustedWidth)
 
         if (isSystemStart) {
           trebleStave.addClef('treble')
           bassStave.addClef('bass')
-
           if (systemIndex === 0) {
-            trebleStave.addTimeSignature(timeSignature)
-            bassStave.addTimeSignature(timeSignature)
+            trebleStave.addKeySignature(keySignature)
+            bassStave.addKeySignature(keySignature)
           }
+          trebleStave.addTimeSignature(timeSignature)
+          bassStave.addTimeSignature(timeSignature)
         }
 
         if (isFinalMeasure) {
           trebleStave.setEndBarType(BarlineType.END)
           bassStave.setEndBarType(BarlineType.END)
+
+          new StaveConnector(trebleStave, bassStave)
+            .setContext(context)
+            .setType('boldDoubleRight') 
+            .draw()
         }
 
         const explicitMeasureTempo = entry.measure.tempoBpm
@@ -1949,7 +2016,7 @@ function App() {
           xBySubdivision: bassXBySubdivision,
         })
 
-        currentX += entry.width
+        currentX += adjustedWidth
       })
     })
 
@@ -3053,12 +3120,6 @@ function App() {
     )
   }
 
-  function selectDuration(nextDuration: BaseDuration) {
-    clearPendingInsertPreview()
-    setBaseDuration(nextDuration)
-    setHelpCard(DURATION_HELP[nextDuration])
-  }
-
   function selectMode(nextMode: EditMode) {
     setMode(nextMode)
     setHelpCard(MODE_HELP[nextMode])
@@ -3526,8 +3587,236 @@ function App() {
     setHoveredRestPosition(null)
   }
 
+  function applyImportedMusicXml(payload: MusicXmlScorePayload) {
+    const importedMeter = parseTimeSignature(
+      payload.timeSignature,
+      payload.timeSignatureGrouping,
+    )
+
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    setTimeSignature(importedMeter.display)
+    setTimeSignatureGrouping(payload.timeSignatureGrouping)
+    setKeySignature(payload.keySignature)
+    setMeasures(
+      normalizeMeasures(payload.measures, importedMeter.subdivisionsPerMeasure),
+    )
+    setSlurs(
+      payload.slurs.map((slur) => ({
+        ...slur,
+        id: slur.id ?? generateId(),
+      })),
+    )
+    setTempoBpm(payload.tempoBpm)
+    setMeasureTempoInput(String(payload.tempoBpm))
+    setTimeSignatureNumeratorInput(String(importedMeter.numerator))
+    setTimeSignatureDenominatorInput(String(importedMeter.denominator) as '2' | '4' | '8' | '16')
+    setTimeSignatureGroupingInput(
+      payload.timeSignatureGrouping?.join('+') ?? '',
+    )
+    clearPendingInsertPreview()
+    setPendingSlurSelection(null)
+    setScoreFrontPopover(null)
+    setActiveMeasureIndex(0)
+    setBaseDuration('8')
+    setActiveTab('notes')
+    setHelpCard(getToolbarTabHelp('notes'))
+    setMode('note')
+    setActiveItemId(null)
+    setLyricsInput('')
+    setScoreTitle(payload.scoreTitle)
+    setScoreSubtitle(payload.scoreSubtitle)
+    setScoreComposer(payload.scoreComposer)
+    setScoreLyricist(payload.scoreLyricist)
+    setScoreArranger(payload.scoreArranger)
+    clearHoverState()
+  }
+
+  function handleExportMusicXML() {
+    try {
+      exportMusicXML({
+        keySignature,
+        measures,
+        scoreArranger,
+        scoreComposer,
+        scoreLyricist,
+        scoreSubtitle,
+        scoreTitle,
+        slurs,
+        tempoBpm,
+        timeSignature,
+        timeSignatureGrouping,
+      })
+      setStatus('MusicXML downloaded successfully.')
+    } catch (err) {
+      console.error('Export MusicXML failed:', err)
+      setStatus('Failed to export MusicXML.')
+    }
+  }
+
+  function handleImportMusicXMLClick() {
+    if (isImportingMusicXml) return
+    importMusicXmlInputRef.current?.click()
+  }
+
+  async function handleImportMusicXMLFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file || isImportingMusicXml) {
+      return
+    }
+
+    setIsImportingMusicXml(true)
+    setStatus(`Importing "${file.name}"...`)
+
+    try {
+      const xml = await file.text()
+      const payload = await importMusicXMLViaBackend(xml)
+      applyImportedMusicXml(payload)
+      const warningSuffix =
+        payload.warnings && payload.warnings.length > 0
+          ? ` Imported with ${payload.warnings.length} warning(s); see console for details.`
+          : ''
+
+      if (payload.warnings && payload.warnings.length > 0) {
+        console.warn('MusicXML import warnings:', payload.warnings)
+      }
+
+      setStatus(`Imported "${file.name}" successfully.${warningSuffix}`)
+    } catch (err) {
+      console.error('Import MusicXML failed:', err)
+      setStatus(
+        err instanceof Error
+          ? `Failed to import MusicXML: ${err.message}`
+          : 'Failed to import MusicXML.',
+      )
+    } finally {
+      setIsImportingMusicXml(false)
+    }
+  }
+
+  function handleExportPDF() {
+    if (isExporting) return
+    const defaultName = (scoreTitle || 'score').replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
+    setExportDialog({ filename: defaultName })
+    setTimeout(() => exportFilenameInputRef.current?.select(), 30)
+  }
+
+  // Called by the dialog's Confirm button or Enter key
+  async function confirmExport(filename: string) {
+    if (!exportDialog) return
+    const safeName = filename.trim() || 'score'
+    setExportDialog(null)
+
+    if (isExporting) return
+    setIsExporting(true)
+    setStatus('Generating PDF…')
+    try {
+      await exportPDF({
+        scoreTitle,
+        overrideFilename: safeName,
+        header: {
+          title: scoreTitle.trim() || 'Untitled',
+          subtitle: scoreSubtitle.trim() || undefined,
+          composer: scoreComposer.trim() || undefined,
+          lyricist: scoreLyricist.trim() || undefined,
+          arranger: scoreArranger.trim() || undefined,
+        },
+        pdfSafeBreakYsSvg:
+          systems.length === 0
+            ? []
+            : (() => {
+                const ys: number[] = []
+                const splitGuardPx = 40
+                for (let i = 0; i < systems.length - 1; i++) {
+                  ys.push(
+                    scoreTop + i * SYSTEM_GAP_Y + GRAND_STAFF_GAP + 110 + splitGuardPx,
+                  )
+                }
+                return ys
+              })(),
+      })
+      setStatus(`PDF saved as "${safeName}.pdf".`)
+    } catch (err) {
+      console.error('Export PDF failed:', err)
+      setStatus('Failed to export PDF.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <div className="app-shell">
+      <input
+        ref={importMusicXmlInputRef}
+        accept=".musicxml,.xml,application/xml,text/xml"
+        hidden
+        onChange={handleImportMusicXMLFile}
+        type="file"
+      />
+      {exportDialog && (
+        <div
+          className="export-dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Save file"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setExportDialog(null)
+          }}
+        >
+          <div className="export-dialog">
+            <div className="export-dialog__header">
+              <span className="export-dialog__icon">📄</span>
+              <h2 className="export-dialog__title">Save as PDF</h2>
+            </div>
+            <p className="export-dialog__hint">
+              Enter a file name (without extension). The file will be saved to your Downloads folder.
+            </p>
+            <div className="export-dialog__field">
+              <input
+                ref={exportFilenameInputRef}
+                autoFocus
+                className="export-dialog__input"
+                id="export-filename-input"
+                maxLength={120}
+                onChange={(e) =>
+                  setExportDialog((d) => (d ? { filename: e.target.value } : d))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    confirmExport(exportDialog.filename)
+                  }
+                }}
+                placeholder="Score filename"
+                type="text"
+                value={exportDialog.filename}
+              />
+              <span className="export-dialog__ext">.pdf</span>
+            </div>
+            <div className="export-dialog__actions">
+              <button
+                className="export-dialog__cancel"
+                onClick={() => setExportDialog(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="export-dialog__confirm"
+                disabled={!exportDialog.filename.trim()}
+                onClick={() => confirmExport(exportDialog.filename)}
+                type="button"
+              >
+                ↓ Save PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">
@@ -3601,55 +3890,56 @@ function App() {
                 key={tab.id}
                 aria-selected={activeTab === tab.id}
                 className={activeTab === tab.id ? 'toolbar-tab active' : 'toolbar-tab'}
-                onClick={() => selectToolbarTab(tab.id)}
+                onClick={() => {
+                  selectToolbarTab(tab.id)
+                  if (!isToolbarExpanded) setIsToolbarExpanded(true)
+                }}
                 role="tab"
                 type="button"
               >
                 {tab.label}
               </button>
             ))}
+
+            <button
+              className="toolbar-tab"
+              style={{ marginLeft: 'auto', fontWeight: 'bold' }}
+              onClick={() => setIsToolbarExpanded((current) => !current)}
+              type="button"
+            >
+              {isToolbarExpanded ? '▲ ' : '▼ '}
+            </button>
           </div>
 
-          <div className="toolbar-panel">
-            <div className="toolbar">
+          {isToolbarExpanded && (
+            <div className="toolbar-panel">
+              <div className="toolbar">
               {activeTab === 'notes' ? (
                 <>
                   <div className="tool-group tool-group--duration">
                     <span className="group-label">Note Value</span>
                     {DURATION_OPTIONS.map((option) => (
                       <button
-                        key={option.baseDuration}
+                        key={`${option.baseDuration}-${option.dots}`}
                         aria-label={option.label}
                         className={
-                          baseDuration === option.baseDuration
+                          baseDuration === option.baseDuration && (dotted ? 1 : 0) === option.dots
                             ? 'tool tool--glyph active'
                             : 'tool tool--glyph'
                         }
-                        onClick={() => selectDuration(option.baseDuration)}
+                        onClick={() => {
+                          setBaseDuration(option.baseDuration);
+                          setDotted(option.dots === 1);
+                          setHelpCard(DURATION_HELP[option.baseDuration]);
+                        }}
                         title={option.label}
                         type="button"
                       >
-                        {buildDurationGlyph(option.baseDuration, false)}
+                        {buildDurationGlyph(option.baseDuration, option.dots === 1)}
                       </button>
                     ))}
                   </div>
 
-                  <div className="tool-group">
-                    <span className="group-label">Dot</span>
-                    <button
-                      aria-label="Toggle dotted value"
-                      className={dotted ? 'tool tool--glyph active' : 'tool tool--glyph'}
-                      disabled={!dotEnabled}
-                      onClick={() => {
-                        setDotted((current) => !current)
-                        setHelpCard(DOTTED_HELP)
-                      }}
-                      title="Dot"
-                      type="button"
-                    >
-                      {buildDurationGlyph(baseDuration, true, 'dot-glyph')}
-                    </button>
-                  </div>
 
                   <div className="tool-group">
                     <span className="group-label">Accidentals</span>
@@ -3949,8 +4239,43 @@ function App() {
                   </div>
                 </div>
               ) : null}
+
+              {activeTab === 'export' ? (
+                <div className="tool-group compact">
+                  <span className="group-label">Import / Export</span>
+                  <button
+                    className="tool tool--io"
+                    disabled={isImportingMusicXml}
+                    onClick={handleImportMusicXMLClick}
+                    title="Import MusicXML via backend parser"
+                    type="button"
+                  >
+                    {isImportingMusicXml ? '...' : 'Import XML'}
+                  </button>
+                  <button
+                    className="tool tool--io"
+                    disabled={isImportingMusicXml}
+                    onClick={handleExportMusicXML}
+                    title="Export score as MusicXML"
+                    type="button"
+                  >
+                    XML
+                  </button>
+                  <button
+                    className="tool tool--io"
+                    disabled={isExporting || isImportingMusicXml}
+                    onClick={handleExportPDF}
+                    title="Export score as PDF"
+                    type="button"
+                  >
+                    {isExporting ? '…' : '↓ PDF'}
+                  </button>
+                </div>
+              ) : null}
+              </div>
             </div>
-          </div>
+          )}
+
         </div>
       </div>
       <main className="workspace">
@@ -4078,7 +4403,7 @@ function App() {
           </section>
         </aside>
 
-        <section className="score-stage">
+        <section className="score-stage" ref={scoreContainerRef}>
           <div className="score-paper score-paper--empty">
             <div className="score-header-card">
               <input
@@ -4220,70 +4545,95 @@ function App() {
                     })()}
                   >
                     <div className="score-front-popover__header">
-                      <strong>Time Signature</strong>
-                      <button
-                        className="score-front-popover__close"
-                        onClick={() => setScoreFrontPopover(null)}
-                        type="button"
-                      >
-                        Close
-                      </button>
-                    </div>
-                    
-                    <div className="score-front-popover__row score-front-popover__row--time">
-                      {TIME_SIGNATURE_OPTIONS.map((option) => (
+                    <strong>{scoreFrontPopover.kind === 'timeSignature' ? 'Time Signature' : 'Key Signature'}</strong>
+                    <button
+                      className="score-front-popover__close"
+                      onClick={() => setScoreFrontPopover(null)}
+                      type="button"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  {scoreFrontPopover.kind === 'timeSignature' ? (
+                    <>
+                      <div className="score-front-popover__row score-front-popover__row--time">
+                        {TIME_SIGNATURE_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            className={
+                              timeSignature === option.value
+                                ? 'score-front-option active'
+                                : 'score-front-option'
+                            }
+                            onClick={() => changeTimeSignature(option.value)}
+                            type="button"
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="score-front-popover__custom-meter">
+                        <label className="toolbar-inline-field">
+                          <span>Numerator</span>
+                          <input
+                            inputMode="numeric"
+                            onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
+                            type="text"
+                            value={timeSignatureNumeratorInput}
+                          />
+                        </label>
+                        <label className="toolbar-inline-field">
+                          <span>Denominator</span>
+                          <select
+                            className="toolbar-select"
+                            onChange={(event) =>
+                              setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
+                            }
+                            value={timeSignatureDenominatorInput}
+                          >
+                            <option value="2">2</option>
+                            <option value="4">4</option>
+                            <option value="8">8</option>
+                            <option value="16">16</option>
+                          </select>
+                        </label>
+                        <label className="toolbar-inline-field toolbar-inline-field--grouping">
+                          <span>Grouping</span>
+                          <input
+                            onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
+                            placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
+                            type="text"
+                            value={timeSignatureGroupingInput}
+                          />
+                        </label>
+                        <button className="tool" onClick={applyCustomTimeSignature} type="button">
+                          Apply Meter
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="score-front-popover__row score-front-popover__row--key">
+                      {KEY_SIGNATURE_OPTIONS.map((option) => (
                         <button
                           key={option.value}
                           className={
-                            timeSignature === option.value
+                            keySignature === option.value
                               ? 'score-front-option active'
                               : 'score-front-option'
                           }
-                          onClick={() => changeTimeSignature(option.value)}
+                          onClick={() => {
+                            setKeySignature(option.value)
+                            setScoreFrontPopover(null)
+                          }}
+                          title={option.label}
                           type="button"
                         >
-                          {option.label}
+                          {option.glyph}
                         </button>
                       ))}
                     </div>
-                    <div className="score-front-popover__custom-meter">
-                      <label className="toolbar-inline-field">
-                        <span>Numerator</span>
-                        <input
-                          inputMode="numeric"
-                          onChange={(event) => setTimeSignatureNumeratorInput(event.target.value)}
-                          type="text"
-                          value={timeSignatureNumeratorInput}
-                        />
-                      </label>
-                      <label className="toolbar-inline-field">
-                        <span>Denominator</span>
-                        <select
-                          className="toolbar-select"
-                          onChange={(event) =>
-                            setTimeSignatureDenominatorInput(event.target.value as '2' | '4' | '8' | '16')
-                          }
-                          value={timeSignatureDenominatorInput}
-                        >
-                          <option value="2">2</option>
-                          <option value="4">4</option>
-                          <option value="8">8</option>
-                          <option value="16">16</option>
-                        </select>
-                      </label>
-                      <label className="toolbar-inline-field toolbar-inline-field--grouping">
-                        <span>Grouping</span>
-                        <input
-                          onChange={(event) => setTimeSignatureGroupingInput(event.target.value)}
-                          placeholder={timeSignatureDenominatorInput === '8' ? '2+2+3' : '1+1+1'}
-                          type="text"
-                          value={timeSignatureGroupingInput}
-                        />
-                      </label>
-                      <button className="tool" onClick={applyCustomTimeSignature} type="button">
-                        Apply Meter
-                      </button>
-                    </div>
+                  )}
                   </div>
                 ) : null}
               </div>

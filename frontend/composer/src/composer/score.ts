@@ -173,8 +173,8 @@ export function getMeasureSubdivisions(timeSignature: TimeSignature): number {
   return parseTimeSignature(timeSignature).subdivisionsPerMeasure
 }
 
-export function canUseDot(_: BaseDuration): boolean {
-  return true
+export function canUseDot(baseDuration: BaseDuration): boolean {
+  return baseDuration !== '32'
 }
 
 export function getDurationSubdivisions(
@@ -213,17 +213,35 @@ export function getDurationPreviewClass(baseDuration: BaseDuration): string {
   )
 }
 
-function parsePitchToken(pitch: NotePitch) {
+/**
+ * 音名字符串规则（与谱面编辑、播放等一致）：
+ * `b/4` = B 本位，`bb/4` = 降 B，`bbb/4` = B 重降，`c##/4` = C 重升，`cbb/4` = C 重降。
+ * 后缀匹配顺序必须为长串在前（## 在 # 前，bbb → bb → b），否则 `bb`、`bbb` 会解析错。
+ */
+export function parsePitchToken(pitch: NotePitch) {
   const [noteToken = 'c', octave = '4'] = pitch.split('/')
-  const match = /^([a-gA-G])([#b]?)$/.exec(noteToken.trim())
-  const letter = (match?.[1] ?? noteToken[0] ?? 'c').toLowerCase()
-  const embeddedAccidental = (match?.[2] ?? '') as '' | '#' | 'b'
+  const token = noteToken.trim().toLowerCase()
+  const m = /^([a-g])(##|#|bbb|bb|b|n)?$/i.exec(token)
+  const letter = (m?.[1] ?? token[0] ?? 'c').toLowerCase()
+  const suf = m?.[2] ?? ''
+
+  let xmlAlter = 0
+  if (suf === '##') xmlAlter = 2
+  else if (suf === '#') xmlAlter = 1
+  else if (suf === 'bbb' || suf === 'bb') xmlAlter = -2
+  else if (suf === 'b') xmlAlter = -1
+  else if (suf === 'n') xmlAlter = 0
+
+  let embeddedAccidental: '' | '#' | 'b' = ''
+  if (suf === '##' || suf === '#') embeddedAccidental = '#'
+  else if (suf === 'bbb' || suf === 'bb' || suf === 'b') embeddedAccidental = 'b'
 
   return {
     embeddedAccidental,
     letter,
     naturalPitch: `${letter}/${octave}` as NotePitch,
     octave,
+    xmlAlter,
   }
 }
 
