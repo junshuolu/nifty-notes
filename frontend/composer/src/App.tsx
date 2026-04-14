@@ -6,6 +6,7 @@ import {
   Annotation,
   Articulation,
   BarlineType,
+  Modifier,
   Beam,
   Curve,
   Dot,
@@ -1814,12 +1815,23 @@ function App() {
         if (isSystemStart) {
           trebleStave.addClef('treble')
           bassStave.addClef('bass')
-          if (systemIndex === 0) {
-            trebleStave.addKeySignature(keySignature)
-            bassStave.addKeySignature(keySignature)
-          }
+          
+          trebleStave.addKeySignature(keySignature)
+          bassStave.addKeySignature(keySignature)
+          
           trebleStave.addTimeSignature(timeSignature)
           bassStave.addTimeSignature(timeSignature)
+          if (systemIndex > 0) {
+            const measureNumber = entry.measureIndex + 1;
+            
+            context.save();
+            if ('setFont' in context) {
+              (context.setFont as Function)('Arial', 14, 'bold');
+            }
+            context.fillText(String(measureNumber), currentX - 10, trebleY + 5);
+
+            context.restore();
+          }
         }
 
         if (isFinalMeasure) {
@@ -4036,6 +4048,23 @@ function App() {
                         {ts}
                       </button>
                     ))}
+                    <label className="toolbar-inline-field" style={{ marginLeft: '12px' }}>
+                      <span>Key:</span>
+                      <select
+                        className="toolbar-select"
+                        value={keySignature}
+                        onChange={(event) => {
+                          setKeySignature(event.target.value as KeySignatureSpec);
+                          setStatus(`Key signature changed to ${event.target.value}.`);
+                        }}
+                      >
+                        {KEY_SIGNATURE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.glyph} ({option.value})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
 
                   <div className="tool-group tool-group--bar-tempo">
