@@ -1,265 +1,149 @@
-# Nifty Notes
+﻿# Nifty Notes
 
-`Nifty Notes` 是一个面向儿童音乐学习场景的双谱表钢琴作曲器原型。它强调“直接点五线谱就能写”，适合快速演示音符录入、节拍切换、和弦编辑、播放和课堂试用。
+Nifty Notes is a React + VexFlow piano score editor for grand staff composition, playback, MusicXML interchange, and PDF export.
 
-## 当前功能
+## Overview
 
-- 双谱表录入：高音谱号 + 低音谱号
-- 扩展音域：高音谱表可继续上探，低音谱表可继续下探
-- 音符与休止符录入
-- 两击式插入：第一击启动预插入，第二击真正落音
-- 默认空白谱面保持四分休止符骨架，小拍位只在实际对应落点悬停或插入后动态细分
-- `Dot` 附点功能
-- 临时记号：升号 ♯、降号 ♭、还原号 ♮（toggle 按钮）
-- 和弦输入：选中已有音符，**同拍位悬停出现半透明和弦水滴预显**，点击即可加音；`Shift + Click` 可移除
-- 动态小节间距：当小节内录入高密度音符（例如十六分、三十二分音符）时，小节横向宽度自适应成倍放大，确保点选精准
-- 奏法记号：Staccato、Staccatissimo、Tenuto、Portato、Marcato、Accent
-- 装饰音：Trill、Turn、Inverted Turn、Mordent、Inverted Mordent
-- 力度记号：`pp`、`p`、`mp`、`mf`、`f`、`ff`、`sfz`
-- 歌词与文本：支持歌词、标题、副标题、Composer、Lyricist、Arranger
-- 拍号切换：支持 `4/4`、`3/4`、`2/4`、`6/8`、`7/8`、`9/8`
-- 自定义拍号：支持分子、分母和分组输入
-- 小节速度：支持 bar 级 tempo mark
-- `Tie` 与 `Slur`
-- Tempo 调整
-- Metronome 开关
-- 播放轨迹竖线
-- Tone.js 回放（含临时记号半音处理）
-- 🎹 Gallery：一键加载内置名曲 demo 乐谱
-- **PDF 导出**：`Export` tab → 「↓ PDF」，本地下载 **A4 纵向分页 PDF**。谱面为 VexFlow SVG → 注入 Bravura → **canvg** 栅格化 → **jsPDF** 嵌入 PNG；首页可有标题/副标题/署名等矢量页眉。**分页**优先按各 **system** 的纵向范围在相邻行距**中点**断页（见 `io.ts` 中 `pdfSystemBoundsSvg` / `getBestCutPointBySystems`）；未提供 system 边界时回退为 `pdfSafeBreakYsSvg` 与谱面高度；非末页带顶 bleed、底 shrink 及窄条**白边遮罩**以减轻接缝。
-- 纯前端静态部署
-- 全局采用硬朗现代的无圆角（Square Corners）设计原则
+The editor runs in the browser, while import/export services are now unified in the backend.
 
-## 本地启动
+- MusicXML import: frontend uploads XML, backend parses it, frontend applies the returned score payload.
+- MusicXML export: frontend sends the current score payload, backend generates `.musicxml`.
+- PDF export: frontend sends the current score payload, backend launches a headless browser, renders the score page, paginates by system, and returns a downloadable PDF.
 
-进入 `frontend/composer` 后执行：
+## Current Features
+
+- Grand staff score editing with treble and bass staves
+- Note, rest, tie, slur, articulation, ornament, lyric, and dynamic editing
+- Time signature changes, custom grouping, bar tempo, and metronome playback
+- Built-in gallery demos
+- MusicXML import through backend parsing
+- MusicXML export through backend generation
+- Backend PDF export with A4 pagination
+
+## Project Structure
+
+```text
+backend/
+  musicxml.mjs        MusicXML parse/generate helpers
+  server.mjs          Backend API and PDF export server
+
+frontend/composer/
+  src/App.tsx         Main UI, VexFlow rendering, PDF render mode
+  src/composer/io.ts  Frontend API calls for import/export
+  dist/               Frontend production build used by backend PDF export
+```
+
+## Requirements
+
+- Node.js 20+
+- A local Chrome or Edge installation
+
+Backend PDF export looks for Chrome or Edge in standard Windows install paths. If your browser is installed elsewhere, set `CHROME_EXECUTABLE_PATH`.
+
+## Install
+
+Frontend:
 
 ```bash
+cd frontend/composer
 npm install
+```
+
+Backend:
+
+```bash
+cd backend
+npm install
+```
+
+## Run Locally
+
+Start the backend:
+
+```bash
+cd backend
+npm start
+```
+
+Start the frontend dev server:
+
+```bash
+cd frontend/composer
 npm run dev
 ```
 
-默认本地地址通常是：
+Default local URLs:
 
 ```text
-http://localhost:5173
+Frontend: http://localhost:5173
+Backend:  http://127.0.0.1:8787
 ```
 
-## 如何使用
+## Important PDF Note
 
-### 1. 选择 Note Value
+Backend PDF export uses the built frontend bundle in `frontend/composer/dist`.
 
-工具栏里可以先选择基础时值：
-
-- Whole
-- Half
-- Quarter
-- Eighth
-- Sixteenth
-
-如果要插入附点版本，再点一次 `Dot`。
-
-### 1.1 临时记号（Accidentals）
-
-工具栏 Accidentals 组有三个 toggle 按钮：
-
-- ♮ Natural（还原号）
-- ♯ Sharp（升号）
-- ♭ Flat（降号）
-
-点击一个按钮激活（高亮蓝色），再次点击取消。激活后插入的音符会自动带上对应记号，播放也按半音处理。
-
-切换 `Note Value` 后，不会把整小节 placeholder 预先改成对应时值：
-
-- 空白小节默认仍显示四分休止符骨架
-- 某一拍开始写更小时值后，只替换这一拍原来的四分休止符位置，不会整小节提前铺满
-- 只有实际插入到的那一拍 / 那一段，才会按真实节奏细分成八分、十六分等更小单位
-- 前后 bar 互不影响，不会因为去别的 bar 插入新音符而重新挤压
-- 每个 group / beat 会按真实密度自动扩宽，不再把密集音符硬塞进固定 bar 宽
-- 同一 measure 仍共享 barline，但高音谱表和低音谱表各自按自己的内容宽度排布，避免一个音部改动后把另一个音部的音符挤乱
-- 休止符会额外再向左一些，音符和蓝色悬停预览也继续约束在小节边界内，避免贴住或顶出 barline
-- 八分音符和十六分音符的点击吸附改成就近落位，连续填入时不需要刻意偏左点
-- `Half` 等较长时值的蓝色悬停预览会和真实插入位置保持一致
-
-### 1.2 当前占位符细分规则
-
-- 默认状态：每个空白 4/4 小节填充四个四分休止符。
-- 八分音符：悬停空拍位置时，当前拍位会先拆分为两个八分休止符骨架。
-- 十六分音符：悬停空拍位置时，当前拍位会呈现经典二分拆分（如 `16th休止符 + 16th休止符 + 8th休止符` 或 `8th休止符 + 16th休止符 + 16th休止符`，取决于悬停在前半拍还是后半拍）。
-- 动态演进：随着十六分内容插入，原先未拆分的八分休止符会自动根据新焦点进一步细分为两个十六分休止符。
-- 渐进细分只作用于当前鼠标焦点所在的局部区域，前后拍与另一谱表保持原占位骨架，避免视觉过度碎片化。
-
-### 2. 选择操作模式
-
-- `Insert Note`：插入音符
-- `Insert Rest`：插入休止符
-- `Tie`：给现有音符或和弦添加 / 取消 tie
-- `Slur`：为两个已选音符之间绘制长连线
-- `Erase`：删除当前位置的整个音符、和弦或休止符
-
-### 3. 在谱面中点击
-
-- `Insert Note` mode 下：
-  1. 鼠标滑过休止符位置时，该休止符自动变蓝高亮，下方出现蓝色水滴图标
-  2. 第一次点击只会启动预插入，不会立刻写入音符
-  3. 第二次点击才真正落音
-  4. 预览位置会跟随当前音高移动
-- 点击已有音符会优先选中该音符，避免误叠和弦
-- 选中某个音符后，再点同一拍位的新音高，可把音加入同一个和弦
-- `Shift + Click` 已有和弦里的某个音高，可把它从和弦里移除
-- `Insert Rest` 模式下，点击任意拍位会插入当前 Note Value 的休止符
-
-### 4. 切换 Time Signature
-
-顶部 `Measures` tab 提供 `4/4`、`3/4`、`2/4` 三个快捷预设。
-
-更多选项（包括 `6/8`、`7/8`、`9/8` 及自定义拍号）可通过点击谱面前导区的拍号弹框选择。
-
-自定义输入支持：
-
-- Numerator
-- Denominator
-- Grouping，例如 `2+2+3`
-
-注意：
-
-- 切换拍号会保留 bar 数量
-- 能继续放进新小节长度里的音符和休止符会保留
-- 超出新拍号容量的内容会被移除
-- placeholder rest 和 beam grouping 会按新拍号分组重算
-
-### 4.1 分组拍号说明
-
-- `6/8` 默认按 `3+3`
-- `9/8` 默认按 `3+3+3`
-- `7/8` 默认按 `2+2+3`
-- 自定义拍号时，可手动输入其它分组，例如 `3+2+2`
-
-### 5. 调整 Tempo 和 Metronome
-
-点击右上角的 `Tempo xx BPM` 可打开设置面板：
-
-- 拖动滑块或直接输入 BPM
-- 打开或关闭 metronome
-
-如果要修改某个 bar 的速度：
-
-- 先选中 bar
-- 在 `Measures` tab 中设置 bar tempo
-- 谱面会在小节上方画出 `♩=xx` 形式的速度记号
-
-### 7. 播放与 Bar 管理
-
-- 点击 `Play` 播放当前谱面
-- 播放时会显示一条贯穿双谱表的竖向播放线
-- 点击 `Stop` 可停止播放
-- `+ Bar` 增加小节
-- `- Bar` 删除最后一个小节
-
-### 8. Articulations / Ornaments / Dynamics / Text
-
-- 先点击谱面里的已有音符完成选中
-- 再切换到对应 tab 应用记号
-- 左侧说明卡片会显示当前 tab 或当前符号的用途说明
-- `Text` tab 可用于歌词输入；标题、副标题和署名字段可直接在谱面上方编辑
-
-### 9. 🎹 Gallery（钢琴名曲库）
-
-点击工具栏的 `Gallery` tab，可以看到 9 首钢琴名曲 demo 卡片：
-
-| 曲目 | 作曲家 | 拍号 | BPM | 调号 |
-|------|--------|------|-----|------|
-| Für Elise | Beethoven | 3/8 | 120 | C |
-| Turkish March | Mozart | 2/4 | 130 | C |
-| Rain and Your | Yiruma | 4/4 | 70 | C |
-| Summer | Joe Hisaishi | 4/4 | 90 | D |
-| Croatian Rhapsody | Maksim Mrvica | 4/4 | 120 | Eb |
-| Mariage d'Amour | Paul de Senneville | 4/4 | 72 | Bb |
-| Souvenirs D'Enfance | Richard Clayderman | 10/8 | 120 | G |
-| Annie's Wonderland | Yanni | 4/4 | 101 | F# |
-| Carrying You | Joe Hisaishi | 4/4 | 83 | C |
-
-点击任意卡片即可一键加载完整乐谱，自动设置标题、副标题、Composer、调号、拍号和 BPM，然后自动切换到 Notes tab 供用户编辑。
-
-### 10. PDF 导出
-
-1. 打开 **`Export`** tab，点击 **↓ PDF**。
-2. 在对话框中输入文件名（无需扩展名），确认后浏览器下载 `.pdf`。
-3. **内容**：与当前屏幕上渲染的乐谱一致；多页时按分页算法切开 SVG 再逐页栅格化。
-4. **分页逻辑**（`src/composer/io.ts`）  
-   - 若调用方传入 **`pdfSystemBoundsSvg`**：`PdfSystemBound[]`，每项为某个 system 在 SVG 用户坐标系下的 `top` / `bottom`。优先在**相邻两个 system 之间的空隙中点**作为断页位置（`getBestCutPointBySystems`），减少「下一行系统碎片漏到上一页」。  
-   - 同时会把由 system 推导出的间隙中点与 **`pdfSafeBreakYsSvg`**（App 根据排版传入的纵向提示线）及谱面底部合并为**兜底切点**（`buildGapCutPointsFromSystems` + `getBestCutPoint`）。  
-   - 当前 **`App.tsx`** 传入 `pdfSafeBreakYsSvg`；`pdfSystemBoundsSvg` 可在后续接入渲染层提供的 system 包围盒后启用。
-5. **切片与接缝**：非首页切片向上带 **top bleed**；非末页对切片下沿做轻微 **bottom shrink**；除最后一页外，在已贴入的 PNG 下沿再画一条很窄的**白色填充矩形**（`PDF_BOTTOM_MASK_MM`），弱化栅格接缝与抗锯齿杂边。
-6. **页眉**：第一页可用矢量文字绘制标题、副标题、Composer / Lyricist / Arranger（与谱面上方信息一致，`drawVectorScoreHeader`）。
-7. **注意**：字体与站点需**同源**，否则 canvg 可能无法加载 Bravura；乐谱内容为位图嵌入 PDF，非矢量谱元。
-
-### 11. Demo 和 Clear
-
-- `🎹 Demo`：加载内置示范曲谱——致爱丽丝
-- `Clear`：清空所有音符（保留小节数量）
-
-打开网站时默认已加载致爱丽丝，可直接点 Play 试听。
-
-### 12. 添加新 demo 曲目
-
-1. 用 MuseScore 打开钢琴谱 → 导出为 `.mxl`
-2. 将 `.mxl` 文件放入 `frontend/Piano sheet music/`
-3. 运行 `node mxl_convert.js` 自动生成 TypeScript demo 文件
-4. 在 `App.tsx` 的 gallery 数组中新增一个卡片 entry
-
-## 构建
+If you change score rendering, layout, or PDF render mode code, rebuild the frontend before exporting PDF:
 
 ```bash
+cd frontend/composer
 npm run build
 ```
 
-构建输出目录：
+## Backend API
 
-```text
-dist/
-```
+- `POST /api/musicxml/import`
+  - Input: `{ "xml": "<musicxml>" }`
+  - Output: normalized score payload for the editor
 
-如需本地预览构建结果：
+- `POST /api/musicxml/export`
+  - Input: current score payload
+  - Output: downloadable `.musicxml`
+
+- `POST /api/pdf/export`
+  - Input: `{ filename, payload }`
+  - Output: downloadable `.pdf`
+
+- `GET /api/pdf/jobs/:id`
+  - Internal endpoint used by the PDF render page
+
+## PDF Export Design
+
+The current PDF flow is backend-driven:
+
+1. Frontend sends the current score payload to `/api/pdf/export`.
+2. Backend stores a temporary PDF job.
+3. Backend opens the built frontend page with `?pdfJob=...`.
+4. Frontend renders a minimal score-only page for PDF capture.
+5. Frontend reports per-system vertical bounds.
+6. Backend packs systems onto A4 pages and generates the final PDF with `page.pdf()`.
+
+The pagination logic is system-based rather than measure-based.
+
+## Development Notes
+
+- `frontend/composer/server/musicxml-import-server.cjs` is legacy and no longer part of the active runtime.
+- The active backend entry is `backend/server.mjs`.
+- The active MusicXML implementation lives in `backend/musicxml.mjs`.
+
+## Build
+
+Frontend build:
 
 ```bash
-npm run preview
-```
-
-## 静态部署
-
-当前项目可以直接作为静态站点部署。当前线上做法是：
-
-1. 本地构建：
-
-```bash
+cd frontend/composer
 npm run build
 ```
 
-2. 上传 `dist/` 到服务器
-
-3. 使用 `pm2` 托管静态目录，例如：
+Backend helper script to rebuild frontend:
 
 ```bash
-pm2 serve /root/nifty-notes/dist 3001 --name nifty-notes --spa
+cd backend
+npm run build:frontend
 ```
 
-## 关键文件
+## Known Limitations
 
-| 文件 | 职责 |
-|------|------|
-| `src/App.tsx` | 主界面、交互逻辑、VexFlow 渲染、播放控制、score-front 热点与弹框、Gallery、PDF 导出对话框 |
-| `src/composer/io.ts` | **PDF 导出**：`exportPDF`、`ExportPdfHeader`、`PdfSystemBound`；SVG 切片、system 感知分页、canvg、jsPDF、矢量页眉、底部白边遮罩 |
-| `src/App.css` | 页面样式、左侧固定栏、右侧滚动区、toolbar、popover、gallery card 样式 |
-| `src/composer/constants.ts` | 常量、类型、音域、拍号、调号、默认配置 |
-| `src/composer/score.ts` | 音高映射、时值换算、分组拍号解析、吸附与播放片段生成 |
-| `src/composer/CursorPreview.tsx` | 鼠标悬停预览 |
-| `src/composer/furElise.ts` | 致爱丽丝示范曲谱数据（旧版手写 25 小节） |
-| `src/composer/demos/` | 9 首钢琴名曲 Gallery demo 数据 |
-| `project_review.md` | 当前阶段的项目回顾 |
-
-## 已知限制
-
-- `Slur` 目前限制在同一 staff、同一系统内
-- `7/8` 等不规则拍号已支持自定义分组，但还没有做成快捷预设按钮
-- 无云保存、账号或后端存储；乐谱仅能通过 **PDF** 本地下载，无专用工程文件格式
+- PDF pagination and cropping are still being tuned for edge cases like dense notation and very tight inter-system spacing.
+- PDF export depends on a local Chrome or Edge executable being available to the backend.
+- The backend serves the built frontend for PDF jobs, so stale `dist/` output can cause old PDF behavior if the frontend was changed but not rebuilt.

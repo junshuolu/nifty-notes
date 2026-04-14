@@ -8,8 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "font:bravura": "node scripts/convert-bravura.mjs",
-    "musicxml:server": "node server/musicxml-import-server.cjs"
+    "font:bravura": "node scripts/convert-bravura.mjs"
   },
   "dependencies": {
     "canvg": "^4.0.3",
