@@ -95,7 +95,23 @@ import {
 import { createFurEliseMeasures } from './composer/furElise'
 import { createRainMeasures, RAIN_META } from './composer/demos/rain'
 import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
-import { exportMusicXML, exportPDF, importMusicXMLViaBackend, type MusicXmlScorePayload } from './composer/io'
+import {
+  exportMusicXMLViaBackend,
+  exportPDFViaBackend,
+  importMusicXMLViaBackend,
+  type PdfSystemBound,
+  type MusicXmlScorePayload,
+} from './composer/io'
+
+declare global {
+  interface Window {
+    __PDF_EXPORT_ERROR__?: string
+    __PDF_RENDER_META__?: {
+      systemBoundsSvg: PdfSystemBound[]
+    }
+    __PDF_RENDER_READY__?: boolean
+  }
+}
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
 const NOTE_VISUAL_SHIFT = 4
@@ -106,6 +122,7 @@ const DEFAULT_GROUP_VISUAL_UNITS = 2
 const SCORE_FRONT_TIME_WIDTH = 34
 const SCORE_FRONT_TIME_POPOVER_WIDTH = 392
 const SCORE_FRONT_HOTSPOT_HEIGHT = GRAND_STAFF_GAP + 62
+const PDF_JOB_SEARCH_PARAM = 'pdfJob'
 
 
 const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
@@ -1422,8 +1439,14 @@ function PendingInsertIndicator({
 }
 
 function App() {
+  const pdfRenderJobId =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get(PDF_JOB_SEARCH_PARAM)
+      : null
+  const isPdfRenderMode = pdfRenderJobId !== null
   const [isToolbarExpanded, setIsToolbarExpanded] = useState(true)
   const scoreRef = useRef<HTMLDivElement | null>(null)
+  const pdfSystemBoundsRef = useRef<PdfSystemBound[]>([])
   const scoreContainerRef = useRef<HTMLElement | null>(null)
   const [availableScoreWidth, setAvailableScoreWidth] = useState(SYSTEM_WRAP_WIDTH)
   const tempoPanelRef = useRef<HTMLDivElement | null>(null)
@@ -1437,8 +1460,10 @@ function App() {
   const playbackStartRef = useRef<number | null>(null)
   const playbackDurationRef = useRef(0)
   const scheduledTransportEventsRef = useRef<number[]>([])
-  const [measures, setMeasures] = useState<MeasureData[]>(() => createFurEliseMeasures())
-  const [timeSignature, setTimeSignature] = useState<TimeSignature>('3/4')
+  const [measures, setMeasures] = useState<MeasureData[]>(() =>
+    isPdfRenderMode ? [createMeasure('measure-1')] : createFurEliseMeasures(),
+  )
+  const [timeSignature, setTimeSignature] = useState<TimeSignature>(isPdfRenderMode ? '4/4' : '3/4')
   const [timeSignatureGrouping, setTimeSignatureGrouping] = useState<number[] | null>(null)
   const [keySignature, setKeySignature] = useState<KeySignatureSpec>('C')
   const [activeTab, setActiveTab] = useState<ToolbarTab>('notes')
@@ -1446,7 +1471,7 @@ function App() {
   const [baseDuration, setBaseDuration] = useState<BaseDuration>('8')
   const [dotted, setDotted] = useState(false)
   const [accidental, setAccidental] = useState<AccidentalType | null>(null)
-  const [tempoBpm, setTempoBpm] = useState(72)
+  const [tempoBpm, setTempoBpm] = useState(isPdfRenderMode ? 80 : 72)
   const [isMetronomeEnabled, setIsMetronomeEnabled] = useState(false)
   const [isTempoPanelOpen, setIsTempoPanelOpen] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -1462,13 +1487,15 @@ function App() {
   const [scoreFrontPopover, setScoreFrontPopover] = useState<ScoreFrontPopover | null>(null)
   const [playhead, setPlayhead] = useState<PlayheadState | null>(null)
   const [status, setStatus] = useState(
-    'Click a rest slot once to arm note insertion, then click again to place the note.',
+    isPdfRenderMode
+      ? 'Preparing backend PDF export...'
+      : 'Click a rest slot once to arm note insertion, then click again to place the note.',
   )
   const [isPlaying, setIsPlaying] = useState(false)
   const [lyricsInput, setLyricsInput] = useState('')
-  const [scoreTitle, setScoreTitle] = useState('F\u00fcr Elise')
+  const [scoreTitle, setScoreTitle] = useState(isPdfRenderMode ? '' : 'F\u00fcr Elise')
   const [scoreSubtitle, setScoreSubtitle] = useState('')
-  const [scoreComposer, setScoreComposer] = useState('Ludwig van Beethoven')
+  const [scoreComposer, setScoreComposer] = useState(isPdfRenderMode ? '' : 'Ludwig van Beethoven')
   const [scoreLyricist, setScoreLyricist] = useState('')
   const [scoreArranger, setScoreArranger] = useState('')
   const [activeMeasureIndex, setActiveMeasureIndex] = useState(0)
@@ -1479,6 +1506,7 @@ function App() {
   const [helpCard, setHelpCard] = useState<HelpCard | null>(null)
   const [isExporting, setIsExporting] = useState(false)
   const [isImportingMusicXml, setIsImportingMusicXml] = useState(false)
+  const [isPdfRenderJobReady, setIsPdfRenderJobReady] = useState(!isPdfRenderMode)
   const [exportDialog, setExportDialog] = useState<{ filename: string } | null>(null)
   const exportFilenameInputRef = useRef<HTMLInputElement | null>(null)
   const importMusicXmlInputRef = useRef<HTMLInputElement | null>(null)
@@ -1789,6 +1817,7 @@ function App() {
     const context = renderer.getContext()
     const noteRegistry = new Map<string, { item: NoteItem; note: StaveNote }>()
     const hitBoxes: MeasureHitBox[] = []
+    const renderedPdfSystemBounds: PdfSystemBound[] = []
 
     const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2;
 
@@ -1796,6 +1825,8 @@ function App() {
       let currentX = SYSTEM_SIDE_PADDING
       const trebleY = scoreTop + systemIndex * SYSTEM_GAP_Y
       const bassY = trebleY + GRAND_STAFF_GAP
+      let systemTop = Number.POSITIVE_INFINITY
+      let systemBottom = Number.NEGATIVE_INFINITY
 
       const rawSystemWidth = system.reduce((sum, entry) => sum + entry.width, 0)
       const isLastSystem = systemIndex === systems.length - 1
@@ -1991,6 +2022,8 @@ function App() {
 
         const trebleHitBounds = getStaffHitBounds(trebleStave, 'treble')
         const bassHitBounds = getStaffHitBounds(bassStave, 'bass')
+        systemTop = Math.min(systemTop, trebleHitBounds.hitTop, bassHitBounds.hitTop)
+        systemBottom = Math.max(systemBottom, trebleHitBounds.hitBottom, bassHitBounds.hitBottom)
 
         hitBoxes.push({
           hitBottom: trebleHitBounds.hitBottom,
@@ -2018,6 +2051,13 @@ function App() {
 
         currentX += adjustedWidth
       })
+
+      if (Number.isFinite(systemTop) && Number.isFinite(systemBottom)) {
+        renderedPdfSystemBounds.push({
+          bottom: systemBottom,
+          top: Math.max(0, systemTop),
+        })
+      }
     })
 
     measures.forEach((measure, measureIndex) => {
@@ -2083,6 +2123,7 @@ function App() {
     })
 
     hitBoxesRef.current = hitBoxes
+    pdfSystemBoundsRef.current = renderedPdfSystemBounds
   }, [
     activeItemId,
     eraseHoverItemId,
@@ -3634,26 +3675,146 @@ function App() {
     clearHoverState()
   }
 
-  function handleExportMusicXML() {
-    try {
-      exportMusicXML({
-        keySignature,
-        measures,
-        scoreArranger,
-        scoreComposer,
-        scoreLyricist,
-        scoreSubtitle,
-        scoreTitle,
-        slurs,
-        tempoBpm,
-        timeSignature,
-        timeSignatureGrouping,
-      })
-      setStatus('MusicXML downloaded successfully.')
-    } catch (err) {
-      console.error('Export MusicXML failed:', err)
-      setStatus('Failed to export MusicXML.')
+  function buildScoreIoPayload(): MusicXmlScorePayload {
+    return {
+      keySignature,
+      measures,
+      scoreArranger,
+      scoreComposer,
+      scoreLyricist,
+      scoreSubtitle,
+      scoreTitle,
+      slurs,
+      tempoBpm,
+      timeSignature,
+      timeSignatureGrouping,
     }
+  }
+
+  useEffect(() => {
+    if (!pdfRenderJobId) {
+      return
+    }
+
+    let cancelled = false
+    setIsPdfRenderJobReady(false)
+    window.__PDF_EXPORT_ERROR__ = undefined
+    window.__PDF_RENDER_META__ = undefined
+    window.__PDF_RENDER_READY__ = false
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/pdf/jobs/${encodeURIComponent(pdfRenderJobId)}`)
+        if (!response.ok) {
+          throw new Error('Backend PDF job could not be loaded.')
+        }
+
+        const job = await response.json() as { filename: string; payload: MusicXmlScorePayload }
+        if (cancelled) {
+          return
+        }
+
+        applyImportedMusicXml(job.payload)
+        setIsPdfRenderJobReady(true)
+        setStatus(`Rendering "${job.filename}.pdf"...`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Backend PDF render failed.'
+        window.__PDF_EXPORT_ERROR__ = message
+        setStatus(message)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [pdfRenderJobId])
+
+  useEffect(() => {
+    if (!pdfRenderJobId || !isPdfRenderJobReady || !scoreRef.current?.querySelector('svg')) {
+      return
+    }
+
+    if (window.__PDF_RENDER_READY__ || window.__PDF_EXPORT_ERROR__) {
+      return
+    }
+
+    let cancelled = false
+
+    void (async () => {
+      try {
+        await new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+        })
+        if ('fonts' in document) {
+          await Promise.allSettled([
+            document.fonts.load('16px Bravura'),
+            document.fonts.ready,
+          ])
+        }
+
+        if (cancelled) {
+          return
+        }
+
+        const pdfSystemBoundsSvg: PdfSystemBound[] =
+          pdfSystemBoundsRef.current.length === systems.length
+            ? pdfSystemBoundsRef.current
+            : systems.map((_, systemIndex) => {
+                const systemTop = scoreTop + systemIndex * SYSTEM_GAP_Y - 26
+                const systemBottom = scoreTop + systemIndex * SYSTEM_GAP_Y + GRAND_STAFF_GAP + 68
+                return {
+                  top: systemTop,
+                  bottom: systemBottom,
+                }
+              })
+
+        if (cancelled) {
+          return
+        }
+
+        window.__PDF_RENDER_META__ = {
+          systemBoundsSvg: pdfSystemBoundsSvg,
+        }
+        window.__PDF_RENDER_READY__ = true
+        setStatus('Rendered score for backend PDF capture.')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Backend PDF render failed.'
+        window.__PDF_EXPORT_ERROR__ = message
+        setStatus(message)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    pdfRenderJobId,
+    isPdfRenderJobReady,
+    scoreTop,
+    scoreTitle,
+    scoreSubtitle,
+    scoreComposer,
+    scoreLyricist,
+    scoreArranger,
+    systems,
+    keySignature,
+    measures,
+    slurs,
+    tempoBpm,
+    timeSignature,
+    timeSignatureGrouping,
+  ])
+
+  function handleExportMusicXML() {
+    void (async () => {
+      try {
+        await exportMusicXMLViaBackend(buildScoreIoPayload())
+        setStatus('MusicXML downloaded successfully.')
+      } catch (err) {
+        console.error('Export MusicXML failed:', err)
+        setStatus('Failed to export MusicXML.')
+      }
+    })()
   }
 
   function handleImportMusicXMLClick() {
@@ -3715,29 +3876,9 @@ function App() {
     setIsExporting(true)
     setStatus('Generating PDF…')
     try {
-      await exportPDF({
-        scoreTitle,
-        overrideFilename: safeName,
-        header: {
-          title: scoreTitle.trim() || 'Untitled',
-          subtitle: scoreSubtitle.trim() || undefined,
-          composer: scoreComposer.trim() || undefined,
-          lyricist: scoreLyricist.trim() || undefined,
-          arranger: scoreArranger.trim() || undefined,
-        },
-        pdfSafeBreakYsSvg:
-          systems.length === 0
-            ? []
-            : (() => {
-                const ys: number[] = []
-                const splitGuardPx = 40
-                for (let i = 0; i < systems.length - 1; i++) {
-                  ys.push(
-                    scoreTop + i * SYSTEM_GAP_Y + GRAND_STAFF_GAP + 110 + splitGuardPx,
-                  )
-                }
-                return ys
-              })(),
+      await exportPDFViaBackend({
+        filename: safeName,
+        payload: buildScoreIoPayload(),
       })
       setStatus(`PDF saved as "${safeName}.pdf".`)
     } catch (err) {
@@ -3746,6 +3887,33 @@ function App() {
     } finally {
       setIsExporting(false)
     }
+  }
+
+  if (isPdfRenderMode) {
+    return (
+      <div
+        style={{
+          background: '#ffffff',
+          margin: 0,
+          minHeight: `${scoreHeight}px`,
+          padding: 0,
+        }}
+      >
+        <div
+          className="score-surface"
+          style={{
+            background: '#ffffff',
+            height: `${scoreHeight}px`,
+            margin: 0,
+            overflow: 'visible',
+            padding: 0,
+            width: `${scoreWidth}px`,
+          }}
+        >
+          <div className="score-canvas" ref={scoreRef} />
+        </div>
+      </div>
+    )
   }
 
   return (

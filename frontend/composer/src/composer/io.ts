@@ -9,15 +9,60 @@
  */
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+const XLINK_NS = 'http://www.w3.org/1999/xlink'
+
+let bravuraFontDataUrlPromise: Promise<string> | null = null
 
 function bravuraFontUrl(): string {
   return new URL(`${import.meta.env.BASE_URL}fonts/Bravura.ttf`, window.location.href).href
 }
 
-function injectBravuraForRasterExport(svg: SVGSVGElement) {
+async function getBravuraFontDataUrl(): Promise<string> {
+  if (!bravuraFontDataUrlPromise) {
+    bravuraFontDataUrlPromise = (async () => {
+      const response = await fetch(bravuraFontUrl())
+      if (!response.ok) {
+        throw new Error('Failed to load Bravura font for PDF export.')
+      }
+
+      const blob = await response.blob()
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(new Error('Failed to read Bravura font for PDF export.'))
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result)
+            return
+          }
+          reject(new Error('Bravura font data could not be converted for PDF export.'))
+        }
+        reader.readAsDataURL(blob)
+      })
+    })()
+  }
+
+  return await bravuraFontDataUrlPromise
+}
+
+async function ensureMusicFontsReady() {
+  if (typeof document === 'undefined' || !('fonts' in document)) {
+    return
+  }
+
+  try {
+    await Promise.allSettled([
+      document.fonts.load('16px Bravura'),
+      document.fonts.ready,
+    ])
+  } catch {
+    // Best effort only; the inline font-face below is the primary fallback.
+  }
+}
+
+async function injectBravuraForRasterExport(svg: SVGSVGElement) {
   const style = document.createElementNS(SVG_NS, 'style')
   style.setAttribute('type', 'text/css')
-  const url = bravuraFontUrl()
+  const url = await getBravuraFontDataUrl()
   style.textContent =
     `@font-face{font-family:Bravura;src:url("${url}") format("truetype");font-weight:normal;font-style:normal;}`
   svg.insertBefore(style, svg.firstChild)
@@ -29,7 +74,11 @@ function injectBravuraForRasterExport(svg: SVGSVGElement) {
 
 const PDF_PAGE_MARGIN_MM = 10
 const PDF_SIDE_MARGIN_MM = 12
-const RASTER_SCALE = Math.min(3, typeof window !== 'undefined' ? window.devicePixelRatio || 2 : 2)
+const PDF_TARGET_DPI = 220
+const PDF_MAX_RASTER_SCALE = 6
+const PDF_MAX_CANVAS_DIMENSION_PX = 8192
+const PDF_MAX_CANVAS_AREA_PX = 24_000_000
+const PDF_EXPORT_HORIZONTAL_PAD_SVG = 96
 
 const PDF_SLICE_BLEED_TOP_SVG = 36
 const PDF_SLICE_BOTTOM_SHRINK_SVG = 8
@@ -210,26 +259,65 @@ function getBestCutPointBySystems(
 
 async function renderSvgSliceToPng(
   source: SVGSVGElement,
+  svgX: number,
   svgW: number,
   currentY: number,
   sliceH: number,
+  outputMmW: number,
+  outputMmH: number,
 ): Promise<string> {
   const { Canvg } = await import('canvg')
 
-  const clone = source.cloneNode(true) as SVGSVGElement
-  if (!clone.getAttribute('xmlns')) {
-    clone.setAttribute('xmlns', SVG_NS)
-  }
-
-  clone.removeAttribute('style')
-  clone.setAttribute('viewBox', `0 ${currentY} ${svgW} ${sliceH}`)
+  const sourceClone = source.cloneNode(true) as SVGSVGElement
+  const clone = document.createElementNS(SVG_NS, 'svg')
+  clone.setAttribute('xmlns', SVG_NS)
+  clone.setAttribute('xmlns:xlink', XLINK_NS)
+  clone.setAttribute('viewBox', `0 0 ${svgW} ${sliceH}`)
   clone.setAttribute('width', String(svgW))
   clone.setAttribute('height', String(sliceH))
-  injectBravuraForRasterExport(clone)
+  clone.setAttribute('overflow', 'visible')
+
+  const defsNodes: Node[] = []
+  const contentGroup = document.createElementNS(SVG_NS, 'g')
+  contentGroup.setAttribute('transform', `translate(${-svgX} ${-currentY})`)
+
+  for (const child of Array.from(sourceClone.childNodes)) {
+    if (
+      child.nodeType === Node.ELEMENT_NODE &&
+      (child as Element).tagName.toLowerCase() === 'defs'
+    ) {
+      defsNodes.push(child)
+      continue
+    }
+
+    contentGroup.appendChild(child)
+  }
+
+  for (const defsNode of defsNodes) {
+    clone.appendChild(defsNode)
+  }
+
+  clone.appendChild(contentGroup)
+  await ensureMusicFontsReady()
+  await injectBravuraForRasterExport(clone)
 
   const svgText = new XMLSerializer().serializeToString(clone)
-  const cw = Math.max(1, Math.floor(svgW * RASTER_SCALE))
-  const ch = Math.max(1, Math.floor(sliceH * RASTER_SCALE))
+  const deviceScale =
+    typeof window !== 'undefined' ? Math.max(1, window.devicePixelRatio || 1) : 1
+  const targetPxW = Math.max(1, Math.round((outputMmW / 25.4) * PDF_TARGET_DPI))
+  const targetPxH = Math.max(1, Math.round((outputMmH / 25.4) * PDF_TARGET_DPI))
+  const dpiScale = Math.max(targetPxW / svgW, targetPxH / sliceH)
+  const preferredScale = Math.max(deviceScale, dpiScale)
+  const dimensionScaleLimit =
+    Math.min(PDF_MAX_CANVAS_DIMENSION_PX / svgW, PDF_MAX_CANVAS_DIMENSION_PX / sliceH)
+  const areaScaleLimit = Math.sqrt(PDF_MAX_CANVAS_AREA_PX / (svgW * sliceH))
+  const rasterScale = Math.max(
+    1,
+    Math.min(PDF_MAX_RASTER_SCALE, preferredScale, dimensionScaleLimit, areaScaleLimit),
+  )
+
+  const cw = Math.max(1, Math.floor(svgW * rasterScale))
+  const ch = Math.max(1, Math.floor(sliceH * rasterScale))
 
   const canvas = document.createElement('canvas')
   canvas.width = cw
@@ -260,14 +348,14 @@ async function renderSvgSliceToPng(
   }
 }
 
-export async function exportPDF(params: {
+async function buildPdfDocument(params: {
   scoreTitle: string
   overrideFilename?: string
   pdfSafeBreakYsSvg?: number[]
   pdfSystemBoundsSvg?: PdfSystemBound[]
   header?: ExportPdfHeader
   scoreSvgSelector?: string
-}): Promise<void> {
+}): Promise<{ pdf: import('jspdf').jsPDF; safeName: string }> {
   const {
     scoreTitle,
     overrideFilename,
@@ -285,11 +373,28 @@ export async function exportPDF(params: {
   }
 
   const vb = svg.viewBox?.baseVal
+  const baseX = vb?.x ?? 0
   const svgW = vb?.width ?? svg.clientWidth
   const svgH = vb?.height ?? svg.clientHeight
 
   if (svgW <= 0 || svgH <= 0) {
     throw new Error('SVG 尺寸无效')
+  }
+
+  let contentX = baseX
+  let contentW = svgW
+  try {
+    const bbox = svg.getBBox()
+    if (Number.isFinite(bbox.x) && Number.isFinite(bbox.width) && bbox.width > 0) {
+      const bboxLeft = bbox.x - PDF_EXPORT_HORIZONTAL_PAD_SVG
+      const bboxRight = bbox.x + bbox.width + PDF_EXPORT_HORIZONTAL_PAD_SVG
+      const baseRight = baseX + svgW + PDF_EXPORT_HORIZONTAL_PAD_SVG
+      contentX = Math.min(baseX - PDF_EXPORT_HORIZONTAL_PAD_SVG, bboxLeft)
+      contentW = Math.max(baseRight, bboxRight) - contentX
+    }
+  } catch {
+    contentX = baseX
+    contentW = svgW
   }
 
   const normalizedSystems = normalizeSystemBounds(pdfSystemBoundsSvg, svgH)
@@ -306,7 +411,7 @@ export async function exportPDF(params: {
   const pdfW = pdf.internal.pageSize.getWidth()
   const pdfH = pdf.internal.pageSize.getHeight()
   const innerW = pdfW - PDF_SIDE_MARGIN_MM * 2
-  const mmPerSvgUnit = innerW / svgW
+  const mmPerSvgUnit = innerW / contentW
 
   let currentY = 0
   let pageIndex = 0
@@ -358,7 +463,15 @@ export async function exportPDF(params: {
     const renderMmH = viewH * mmPerSvgUnit
     const drawYMm = bodyTopMm
 
-    const pngDataUrl = await renderSvgSliceToPng(svg, svgW, viewY, viewH)
+    const pngDataUrl = await renderSvgSliceToPng(
+      svg,
+      contentX,
+      contentW,
+      viewY,
+      viewH,
+      innerW,
+      renderMmH,
+    )
 
     pdf.addImage(
       pngDataUrl,
@@ -390,7 +503,34 @@ export async function exportPDF(params: {
     .replace(/[^a-zA-Z0-9_\- ]/g, '_')
     .trim()
 
+  return { pdf, safeName }
+}
+
+export async function exportPDF(params: {
+  scoreTitle: string
+  overrideFilename?: string
+  pdfSafeBreakYsSvg?: number[]
+  pdfSystemBoundsSvg?: PdfSystemBound[]
+  header?: ExportPdfHeader
+  scoreSvgSelector?: string
+}): Promise<void> {
+  const { pdf, safeName } = await buildPdfDocument(params)
   pdf.save(`${safeName}.pdf`)
+}
+
+export async function exportPDFToDataUri(params: {
+  scoreTitle: string
+  overrideFilename?: string
+  pdfSafeBreakYsSvg?: number[]
+  pdfSystemBoundsSvg?: PdfSystemBound[]
+  header?: ExportPdfHeader
+  scoreSvgSelector?: string
+}): Promise<{ dataUri: string; filename: string }> {
+  const { pdf, safeName } = await buildPdfDocument(params)
+  return {
+    dataUri: pdf.output('datauristring'),
+    filename: `${safeName}.pdf`,
+  }
 }
 
 export type MusicXmlScoreSlur = {
@@ -489,17 +629,73 @@ function escapeXml(text: string): string {
 
 function downloadTextFile(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType })
+  downloadBlob(filename, blob)
+}
+
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename
+  anchor.style.display = 'none'
+  document.body.appendChild(anchor)
   anchor.click()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 function getSafeScoreFilename(name: string, fallbackExtension: string): string {
   const safeName = name.replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
   return `${safeName}.${fallbackExtension}`
+}
+
+function parseDownloadFilename(contentDisposition: string | null, fallbackFilename: string): string {
+  if (!contentDisposition) {
+    return fallbackFilename
+  }
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    } catch {
+      return utf8Match[1]
+    }
+  }
+
+  const plainMatch = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition)
+  return plainMatch?.[1] ?? fallbackFilename
+}
+
+async function parseErrorResponse(response: Response, fallbackMessage: string): Promise<string> {
+  try {
+    const payload: unknown = await response.json()
+    if (
+      typeof payload === 'object' &&
+      payload !== null &&
+      'error' in payload &&
+      typeof payload.error === 'string'
+    ) {
+      return payload.error
+    }
+  } catch {
+    // ignore invalid JSON error responses
+  }
+
+  return fallbackMessage
+}
+
+async function downloadResponseFile(response: Response, fallbackFilename: string) {
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response, 'File export failed.'))
+  }
+
+  const filename = parseDownloadFilename(
+    response.headers.get('Content-Disposition'),
+    fallbackFilename,
+  )
+  const blob = await response.blob()
+  downloadBlob(filename, blob)
 }
 
 function splitSubdivisions(subdivisions: number): Array<{ baseDuration: BaseDuration; dots: 0 | 1 }> {
@@ -922,6 +1118,39 @@ export function exportMusicXML(payload: MusicXmlScorePayload) {
   downloadTextFile(filename, document, 'application/vnd.recordare.musicxml+xml;charset=utf-8')
 }
 
+export async function exportMusicXMLViaBackend(payload: MusicXmlScorePayload) {
+  const response = await fetch('/api/musicxml/export', {
+    body: JSON.stringify(payload),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  })
+
+  await downloadResponseFile(
+    response,
+    getSafeScoreFilename(payload.scoreTitle || 'score', 'musicxml'),
+  )
+}
+
+export async function exportPDFViaBackend(params: {
+  filename: string
+  payload: MusicXmlScorePayload
+}) {
+  const response = await fetch('/api/pdf/export', {
+    body: JSON.stringify(params),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  })
+
+  await downloadResponseFile(
+    response,
+    getSafeScoreFilename(params.filename || params.payload.scoreTitle || 'score', 'pdf'),
+  )
+}
+
 export async function importMusicXMLViaBackend(xml: string): Promise<MusicXmlScorePayload> {
   const response = await fetch('/api/musicxml/import', {
     body: JSON.stringify({ xml }),
@@ -931,25 +1160,11 @@ export async function importMusicXMLViaBackend(xml: string): Promise<MusicXmlSco
     method: 'POST',
   })
 
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
   if (!response.ok) {
-    const message =
-      typeof payload === 'object' &&
-      payload !== null &&
-      'error' in payload &&
-      typeof payload.error === 'string'
-        ? payload.error
-        : 'MusicXML import failed.'
-    throw new Error(message)
+    throw new Error(await parseErrorResponse(response, 'MusicXML import failed.'))
   }
 
-  return payload as MusicXmlScorePayload
+  return await response.json() as MusicXmlScorePayload
 }
 import {
   STAFF_IDS,
