@@ -494,6 +494,42 @@
   gap: 12px;
 }
 
+.score-front-popover__meta {
+  color: #64748b;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.score-front-popover__key-mode {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #d9e1ef;
+  background: #f8fbff;
+}
+
+.score-front-popover__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #20304f;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.score-front-popover__checkbox input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #2563eb;
+}
+
+.score-front-popover__hint {
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .score-front-popover__close {
   border: 0;
   background: transparent;
@@ -1218,26 +1254,15 @@ button[title='Load Fur Elise Demo']::before {
 }
 
 .workspace {
+  display: flex;
   flex: 1;
+  justify-content: center;
   min-height: 0;
-  overflow: hidden;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  overflow: auto;
   padding: 18px 24px 24px;
 }
 
 .sidebar {
-  display: flex;
-  align-self: start;
-  flex-direction: column;
-  gap: 16px;
-  max-height: 100%;
-  overflow-y: auto;
-  padding-right: 4px;
-  position: sticky;
-  top: 0;
-}
-
-.sidebar > .panel:not(.panel--guide):not(.panel--status):not(.panel--selection):not(.panel--score) {
   display: none;
 }
 
@@ -1265,10 +1290,12 @@ button[title='Load Fur Elise Demo']::before {
   display: grid;
   gap: 18px;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 6px;
+  overflow: visible;
+  padding-right: 0;
   justify-items: center;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
 }
 
 .score-paper {
@@ -1279,6 +1306,7 @@ button[title='Load Fur Elise Demo']::before {
   width: fit-content;
   max-width: 100%;
   box-sizing: border-box;
+  margin: 0 auto;
 }
 
 .score-paper--empty {
@@ -1355,6 +1383,8 @@ button[title='Load Fur Elise Demo']::before {
 }
 
 .score-viewport {
+  display: flex;
+  justify-content: center;
   margin-top: 6px;
   padding-top: 18px;
   border-top: 1px solid rgba(226, 232, 240, 0.92);
@@ -1388,20 +1418,12 @@ button[title='Load Fur Elise Demo']::before {
   }
 
   .workspace {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
-  }
-
-  .sidebar {
-    max-height: none;
-    overflow: visible;
-    padding-right: 0;
-    position: static;
+    padding-left: 18px;
+    padding-right: 18px;
   }
 
   .score-stage {
-    overflow: visible;
-    padding-right: 0;
+    max-width: 100%;
   }
 }
 

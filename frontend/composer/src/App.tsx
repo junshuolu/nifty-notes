@@ -7,6 +7,7 @@ import {
   Articulation,
   BarlineType,
   Beam,
+  Clef as VFClef,
   Curve,
   Dot,
   Formatter,
@@ -20,6 +21,7 @@ import {
   StaveNote,
   StaveTie,
   TextDynamics,
+  TimeSignature as VFTimeSignature,
   Voice,
 } from 'vexflow'
 import './App.css'
@@ -70,6 +72,7 @@ import {
   findNextContiguousItem,
   findNextStartingItem,
   findStartingItem,
+  getDisplayAccidentalForPitch,
   getChordStemDirection,
   getDurationName,
   getDurationSubdivisions,
@@ -77,18 +80,21 @@ import {
   getItemSubdivisions,
   getItemsForStaff,
   getMeasureTempoTimeline,
+  getNaturalizedPitch,
   getPitchLabel,
   getPitchLabels,
   getSubdivisionGroupInfo,
-  haveSamePitches,
+  haveSameNotePitches,
   itemEnd,
   normalizeMeasures,
   parseTimeSignature,
   pitchToY,
   rangesOverlap,
+  rewriteMeasuresForKeySignature,
   snapSubdivision,
   sortPitches,
   toTonePitch,
+  transposeMeasuresForKeySignature,
   type MeasureTempoTiming,
   yToPitch,
 } from './composer/score'
@@ -119,10 +125,31 @@ const REST_VISUAL_SHIFT = 11
 const MEASURE_EDGE_PADDING = 3
 const GRID_EDGE_PADDING = 10
 const DEFAULT_GROUP_VISUAL_UNITS = 2
-const SCORE_FRONT_TIME_WIDTH = 34
-const SCORE_FRONT_TIME_POPOVER_WIDTH = 392
+const SYSTEM_MEASURE_NUMBER_FONT_SIZE = 16
+const SYSTEM_MEASURE_NUMBER_OFFSET_X = 8
+const SYSTEM_MEASURE_NUMBER_OFFSET_Y = -4
+const SYSTEM_NATURAL_KEY_PLACEHOLDER_FONT_SIZE = 18
+const SYSTEM_NATURAL_KEY_PLACEHOLDER_PADDING = 18
+const SYSTEM_NATURAL_KEY_PLACEHOLDER_OFFSET_Y = 0
+const SCORE_FRONT_HOTSPOT_PAD_X = 10
+const SCORE_FRONT_KEY_MIN_WIDTH = 34
+const SCORE_FRONT_TIME_MIN_WIDTH = 44
+const SCORE_FRONT_TIME_POPOVER_WIDTH = 480
+const SCORE_FRONT_KEY_POPOVER_WIDTH = 540
 const SCORE_FRONT_HOTSPOT_HEIGHT = GRAND_STAFF_GAP + 62
+const SCORE_MIN_SURFACE_WIDTH = 640
 const PDF_JOB_SEARCH_PARAM = 'pdfJob'
+const SHARP_SYMBOL = '\u266F'
+const FLAT_SYMBOL = '\u266D'
+const NATURAL_SYMBOL = '\u266E'
+
+type VexRenderContext = ReturnType<Renderer['getContext']>
+type KeySignatureMeta = {
+  countLabel: string
+  countPhrase: string
+  keyNames: string
+  summaryGlyph: string
+}
 
 
 const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
@@ -130,7 +157,7 @@ const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'articulations', label: 'Articulations', hint: 'Apply touch and accent marks to the selected note.' },
   { id: 'ornaments', label: 'Ornaments', hint: 'Add trill and ornament symbols above the selected note.' },
   { id: 'dynamics', label: 'Dynamics', hint: 'Attach expressive dynamic markings to the selected note.' },
-  { id: 'bars', label: 'Measures', hint: 'Manage bars, meter, playback demo, and reset tools.' },
+  { id: 'bars', label: 'Bars', hint: 'Manage bars, meter, playback demo, and reset tools.' },
   { id: 'text', label: 'Text', hint: 'Edit score title fields and lyrics for the selected note.' },
   { id: 'gallery', label: '🎹 Gallery', hint: 'Load a piano masterpiece and start editing it.' },
   { id: 'export', label: 'Export', hint: 'Save the score as a PDF file.' },
@@ -202,9 +229,102 @@ const KEY_SIGNATURE_OPTIONS: Array<{
     { glyph: '♭♭♭♭♭♭♭', label: '7 flats', value: 'Cb' },
   ]
 
+const KEY_SIGNATURE_META: Record<KeySignatureSpec, KeySignatureMeta> = {
+  A: {
+    countLabel: '3#',
+    countPhrase: 'three sharps',
+    keyNames: 'A Major / F# Minor',
+    summaryGlyph: SHARP_SYMBOL.repeat(3),
+  },
+  Ab: {
+    countLabel: '4b',
+    countPhrase: 'four flats',
+    keyNames: 'Ab Major / F Minor',
+    summaryGlyph: FLAT_SYMBOL.repeat(4),
+  },
+  B: {
+    countLabel: '5#',
+    countPhrase: 'five sharps',
+    keyNames: 'B Major / G# Minor',
+    summaryGlyph: SHARP_SYMBOL.repeat(5),
+  },
+  Bb: {
+    countLabel: '2b',
+    countPhrase: 'two flats',
+    keyNames: 'Bb Major / G Minor',
+    summaryGlyph: FLAT_SYMBOL.repeat(2),
+  },
+  C: {
+    countLabel: 'natural',
+    countPhrase: 'the natural key signature with no sharps or flats',
+    keyNames: 'C Major / A Minor',
+    summaryGlyph: NATURAL_SYMBOL,
+  },
+  'C#': {
+    countLabel: '7#',
+    countPhrase: 'seven sharps',
+    keyNames: 'C# Major / A# Minor',
+    summaryGlyph: SHARP_SYMBOL.repeat(7),
+  },
+  Cb: {
+    countLabel: '7b',
+    countPhrase: 'seven flats',
+    keyNames: 'Cb Major / Ab Minor',
+    summaryGlyph: FLAT_SYMBOL.repeat(7),
+  },
+  D: {
+    countLabel: '2#',
+    countPhrase: 'two sharps',
+    keyNames: 'D Major / B Minor',
+    summaryGlyph: SHARP_SYMBOL.repeat(2),
+  },
+  Db: {
+    countLabel: '5b',
+    countPhrase: 'five flats',
+    keyNames: 'Db Major / Bb Minor',
+    summaryGlyph: FLAT_SYMBOL.repeat(5),
+  },
+  E: {
+    countLabel: '4#',
+    countPhrase: 'four sharps',
+    keyNames: 'E Major / C# Minor',
+    summaryGlyph: SHARP_SYMBOL.repeat(4),
+  },
+  Eb: {
+    countLabel: '3b',
+    countPhrase: 'three flats',
+    keyNames: 'Eb Major / C Minor',
+    summaryGlyph: FLAT_SYMBOL.repeat(3),
+  },
+  F: {
+    countLabel: '1b',
+    countPhrase: 'one flat',
+    keyNames: 'F Major / D Minor',
+    summaryGlyph: FLAT_SYMBOL,
+  },
+  'F#': {
+    countLabel: '6#',
+    countPhrase: 'six sharps',
+    keyNames: 'F# Major / D# Minor',
+    summaryGlyph: SHARP_SYMBOL.repeat(6),
+  },
+  G: {
+    countLabel: '1#',
+    countPhrase: 'one sharp',
+    keyNames: 'G Major / E Minor',
+    summaryGlyph: SHARP_SYMBOL,
+  },
+  Gb: {
+    countLabel: '6b',
+    countPhrase: 'six flats',
+    keyNames: 'Gb Major / Eb Minor',
+    summaryGlyph: FLAT_SYMBOL.repeat(6),
+  },
+}
+
 const TAB_SELECTION_HINT: Record<Exclude<ToolbarTab, 'notes'>, string> = {
   articulations: 'Click an existing note while this tab is open to select it.',
-  bars: 'Click a bar in the score to target it, then set a tempo mark from the Measures toolbar.',
+  bars: 'Click a measure in the score to target it, then set a tempo mark from the Measures toolbar.',
   dynamics: 'Click an existing note to choose where the dynamic marking should appear.',
   export: 'Use the button below to export the score as PDF — no note selection needed.',
   gallery: 'Click a demo card to load that piece as your score.',
@@ -233,9 +353,9 @@ const TAB_SIDEBAR_TIPS: Record<ToolbarTab, string[]> = {
     'Dynamics sit below the note and keep their spacing when the note moves vertically.',
   ],
   bars: [
-    'Click any measure in the score to target that bar for tempo changes.',
+    'Click any measure in the score to target that measure for tempo changes.',
     'Click the time signature or key signature at the front of a system to open its chooser directly on the score.',
-    'Set a bar tempo to draw a metronome mark above that measure and change playback from there onward.',
+    'Set a measure tempo to draw a metronome mark above that measure and change playback from there onward.',
   ],
   gallery: [
     'Click any demo card to load that piano piece as your working score.',
@@ -257,30 +377,38 @@ const ACCIDENTAL_LABELS: Record<AccidentalType, string> = {
   n: 'Natural',
 }
 
-const DURATION_HELP: Record<BaseDuration, { description: string; title: string }> = {
-  '8': {
-    description: 'An eighth note fills half a beat in simple meter and is useful for flowing melodic movement.',
-    title: 'Eighth Note',
+const DURATION_HELP: Record<string, { description: string; title: string }> = {
+  '8:0': {
+    description: 'A quaver (8th note) fills half a beat in simple metre and suits flowing melodic movement.',
+    title: 'Quaver (8th Note)',
   },
-  '16': {
-    description: 'A sixteenth note fills a quarter of a beat and is useful for fast ornamental or rhythmic detail.',
-    title: 'Sixteenth Note',
+  '16:0': {
+    description: 'A semi-quaver (16th note) fills a quarter of a beat and suits fast ornamental or rhythmic detail.',
+    title: 'Semi-quaver (16th Note)',
   },
-  '32': {
-    description: 'A thirty-second note fills one eighth of a beat and is useful for very fast ornamental figures.',
-    title: 'Thirty-second Note',
+  '32:0': {
+    description: 'A demisemiquaver (32nd note) fills one eighth of a beat and suits very fast ornamental figures.',
+    title: 'Demisemiquaver (32nd Note)',
   },
-  h: {
-    description: 'A half note spans two beats and now highlights long empty rests the same way as shorter values.',
-    title: 'Half Note',
+  'h:0': {
+    description: 'A minim (half note) spans two beats and keeps the existing long-rest placement behaviour intact.',
+    title: 'Minim (Half Note)',
   },
-  q: {
-    description: 'A quarter note fills one beat and is the default pulse value for the staff and tempo marks.',
-    title: 'Quarter Note',
+  'h:1': {
+    description: 'A dotted minim (dotted half note) spans three beats in simple metre and suits sustained phrases.',
+    title: 'Dotted Minim (Dotted Half Note)',
   },
-  w: {
-    description: 'A whole note spans the longest single note value on the toolbar and now highlights compatible long rests too.',
-    title: 'Whole Note',
+  'q:0': {
+    description: 'A crotchet (quarter note) fills one beat and remains the default pulse value for tempo markings.',
+    title: 'Crotchet (Quarter Note)',
+  },
+  'q:1': {
+    description: 'A dotted crotchet (dotted quarter note) spans one and a half beats and works cleanly with compound groupings.',
+    title: 'Dotted Crotchet (Dotted Quarter Note)',
+  },
+  'w:0': {
+    description: 'A semibreve (whole note) spans the longest single value on the toolbar and still respects measure-fit constraints.',
+    title: 'Semibreve (Whole Note)',
   },
 }
 
@@ -389,27 +517,27 @@ const DYNAMIC_HELP: Record<DynamicType, { description: string; title: string }> 
 
 const TIME_SIGNATURE_HELP: Record<string, { description: string; title: string }> = {
   '2/4': {
-    description: 'Two quarter-note beats per bar. Useful for quick, march-like or dance-like pulse.',
+    description: 'Two crotchet (quarter-note) beats per measure. Useful for a quick march-like or dance-like pulse.',
     title: '2/4 Time',
   },
   '3/4': {
-    description: 'Three quarter-note beats per bar. Useful for waltz and other triple-meter phrasing.',
+    description: 'Three crotchet (quarter-note) beats per measure. Useful for waltz and other triple-metre phrasing.',
     title: '3/4 Time',
   },
   '4/4': {
-    description: 'Four quarter-note beats per bar. This is the most common simple meter for broad phrasing.',
+    description: 'Four crotchet (quarter-note) beats per measure. This is the most common simple metre for broad phrasing.',
     title: '4/4 Time',
   },
   '6/8': {
-    description: 'Six eighth-notes grouped as 3+3. Beams and placeholder rests follow two compound beats.',
+    description: 'Six quavers (8th notes) grouped as 3+3. Beams and placeholder rests follow two compound beats.',
     title: '6/8 Time',
   },
   '7/8': {
-    description: 'Seven eighth-notes grouped by default as 2+2+3. Beams and placeholder rests follow that readable grouping.',
+    description: 'Seven quavers (8th notes) grouped by default as 2+2+3. Beams and placeholder rests follow that readable grouping.',
     title: '7/8 Time',
   },
   '9/8': {
-    description: 'Nine eighth-notes grouped as 3+3+3. Beams and placeholder rests follow three compound beats.',
+    description: 'Nine quavers (8th notes) grouped as 3+3+3. Beams and placeholder rests follow three compound beats.',
     title: '9/8 Time',
   },
 }
@@ -464,28 +592,10 @@ function haveSameNumberSequence(left: number[] | null | undefined, right: number
   return left.every((value, index) => value === right[index])
 }
 
-const KEY_SIGNATURE_HELP: Record<KeySignatureSpec, { description: string; title: string }> = {
-  A: { description: 'A major / F# minor uses three sharps in the key signature.', title: 'Key Signature: A' },
-  Ab: { description: 'A-flat major / F minor uses four flats in the key signature.', title: 'Key Signature: Ab' },
-  B: { description: 'B major / G# minor uses five sharps in the key signature.', title: 'Key Signature: B' },
-  Bb: { description: 'B-flat major / G minor uses two flats in the key signature.', title: 'Key Signature: Bb' },
-  C: { description: 'C major / A minor uses the natural key signature with no sharps or flats.', title: 'Key Signature: C' },
-  'C#': { description: 'C-sharp major / A# minor uses seven sharps in the key signature.', title: 'Key Signature: C#' },
-  Cb: { description: 'C-flat major / A-flat minor uses seven flats in the key signature.', title: 'Key Signature: Cb' },
-  D: { description: 'D major / B minor uses two sharps in the key signature.', title: 'Key Signature: D' },
-  Db: { description: 'D-flat major / B-flat minor uses five flats in the key signature.', title: 'Key Signature: Db' },
-  E: { description: 'E major / C# minor uses four sharps in the key signature.', title: 'Key Signature: E' },
-  Eb: { description: 'E-flat major / C minor uses three flats in the key signature.', title: 'Key Signature: Eb' },
-  F: { description: 'F major / D minor uses one flat in the key signature.', title: 'Key Signature: F' },
-  'F#': { description: 'F-sharp major / D# minor uses six sharps in the key signature.', title: 'Key Signature: F#' },
-  G: { description: 'G major / E minor uses one sharp in the key signature.', title: 'Key Signature: G' },
-  Gb: { description: 'G-flat major / E-flat minor uses six flats in the key signature.', title: 'Key Signature: Gb' },
-}
-
 const BAR_ACTION_HELP = {
   add: {
-    description: 'Add Bar appends a new measure to the score and extends the layout automatically.',
-    title: 'Add Bar',
+    description: 'Add Measure appends a new measure to the score and extends the layout automatically.',
+    title: 'Add Measure',
   },
   clear: {
     description: 'Clear removes all notes and rests from the score while leaving an editable blank page.',
@@ -496,12 +606,12 @@ const BAR_ACTION_HELP = {
     title: 'Demo Score',
   },
   remove: {
-    description: 'Remove Bar deletes the last measure, but always leaves at least one bar on the page.',
-    title: 'Remove Bar',
+    description: 'Remove Measure deletes the last measure, but always leaves at least one measure on the page.',
+    title: 'Remove Measure',
   },
   tempo: {
-    description: 'Bar tempo places a metronome-style tempo mark above the selected measure and changes playback from that bar onward.',
-    title: 'Bar Tempo',
+    description: 'Measure tempo places a metronome-style tempo mark above the selected measure and changes playback from that measure onward.',
+    title: 'Measure Tempo',
   },
 } as const
 
@@ -519,7 +629,6 @@ type PlaceholderFocus = {
 
 type HoveredRestPosition = {
   measureIndex: number
-  previewY?: number
   staffId: StaffId
   subdivision: number
 }
@@ -527,8 +636,6 @@ type HoveredRestPosition = {
 type PendingInsertPreview = {
   measureIndex: number
   pitch: NotePitch
-  previewX: number
-  previewY: number
   staffId: StaffId
   subdivision: number
 }
@@ -548,7 +655,7 @@ type PendingSlurSelection = {
 }
 
 type ScoreFrontPopover = {
-  anchorLeft: number
+  anchorCenter: number
   kind: 'keySignature' | 'timeSignature'
   measureIndex: number
   top: number
@@ -576,6 +683,10 @@ function getToolbarTabHelp(tab: ToolbarTab): HelpCard {
   }
 }
 
+function getDurationHelp(baseDuration: BaseDuration, dotted: boolean): HelpCard {
+  return DURATION_HELP[`${baseDuration}:${dotted ? 1 : 0}`] ?? DURATION_HELP['q:0']
+}
+
 function getMeasureHelp(
   measureIndex: number,
   effectiveTempo: number,
@@ -583,9 +694,9 @@ function getMeasureHelp(
 ): HelpCard {
   return {
     description: hasExplicitTempo
-      ? `Bar ${measureIndex + 1} already has its own tempo mark at ${effectiveTempo} BPM. Update it here to redraw the mark and change playback from this bar onward.`
-      : `Bar ${measureIndex + 1} is currently inheriting ${effectiveTempo} BPM. Set a bar tempo here to place a metronome mark above this measure.`,
-    title: `Bar ${measureIndex + 1} Tempo`,
+      ? `Measure ${measureIndex + 1} already has its own tempo mark at ${effectiveTempo} BPM. Update it here to redraw the mark and change playback from this measure onward.`
+      : `Measure ${measureIndex + 1} is currently inheriting ${effectiveTempo} BPM. Set a measure tempo here to place a metronome mark above this measure.`,
+    title: `Measure ${measureIndex + 1} Tempo`,
   }
 }
 
@@ -593,9 +704,10 @@ function getSelectedNoteHelp(
   note: NoteItem,
   measureIndex: number,
   staffId: StaffId,
+  keySignature: KeySignatureSpec,
 ): HelpCard {
   const details = [
-    `${getDurationName(note.baseDuration, note.dots === 1)} note on the ${staffId} staff in bar ${measureIndex + 1}.`,
+    `${getDurationName(note.baseDuration, note.dots === 1)} note on the ${staffId} staff in measure ${measureIndex + 1}.`,
   ]
 
   if (note.articulation) {
@@ -616,7 +728,7 @@ function getSelectedNoteHelp(
 
   return {
     description: details.join(' '),
-    title: getPitchLabels(note.pitches, note.accidentals),
+    title: getPitchLabels(note.pitches, note.accidentals, keySignature),
   }
 }
 
@@ -651,8 +763,36 @@ function clampTempo(nextTempo: number) {
   return Math.min(MAX_BPM, Math.max(MIN_BPM, Math.round(nextTempo)))
 }
 
+function getKeySignatureMeta(keySignature: KeySignatureSpec) {
+  return KEY_SIGNATURE_META[keySignature]
+}
+
+function getKeySignatureNames(keySignature: KeySignatureSpec) {
+  return getKeySignatureMeta(keySignature).keyNames
+}
+
+function getKeySignatureHelp(keySignature: KeySignatureSpec): HelpCard {
+  const meta = getKeySignatureMeta(keySignature)
+  return {
+    description: `${meta.keyNames} uses ${meta.countPhrase} in the key signature.`,
+    title: `Key Signature: ${meta.keyNames}`,
+  }
+}
+
+function getKeySignaturePickerTitle(keySignature: KeySignatureSpec) {
+  const meta = getKeySignatureMeta(keySignature)
+  return `Set ${meta.keyNames} key signature (${meta.countLabel})`
+}
+
 function getKeySignatureDisplayLabel(keySignature: KeySignatureSpec) {
-  return KEY_SIGNATURE_OPTIONS.find((option) => option.value === keySignature)?.glyph ?? keySignature
+  const meta = getKeySignatureMeta(keySignature)
+  return `${meta.summaryGlyph} (${meta.keyNames})`
+}
+
+function getKeySignatureChangeModeDescription(shouldTranspose: boolean) {
+  return shouldTranspose
+    ? 'Existing notes will transpose into the new key and playback will move with them.'
+    : 'Existing notes will keep their sounding pitch and be respelled for the new key signature.'
 }
 
 function getSystemIndexForMeasure(
@@ -667,6 +807,7 @@ function getSystemIndexForMeasure(
 function trimMeasuresForTimeSignature(
   sourceMeasures: MeasureData[],
   nextSubdivisionsPerMeasure: number,
+  keySignature: KeySignatureSpec,
 ) {
   const draft = cloneMeasures(sourceMeasures)
   let removedItemCount = 0
@@ -694,7 +835,7 @@ function trimMeasuresForTimeSignature(
   })
 
   return {
-    measures: normalizeMeasures(draft, nextSubdivisionsPerMeasure),
+    measures: normalizeMeasures(draft, nextSubdivisionsPerMeasure, keySignature),
     removedItemCount,
   }
 }
@@ -778,6 +919,7 @@ function getRestKey(staffId: StaffId): string {
 function createVisualNote(
   item: ScoreItem,
   staffId: StaffId,
+  keySignature: KeySignatureSpec,
   activeItemId: string | null,
   eraseHoverItemId: string | null,
   noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>,
@@ -789,7 +931,7 @@ function createVisualNote(
         clef: staffId,
         dots: item.dots,
         duration: item.baseDuration,
-        keys: item.pitches,
+        keys: item.pitches.map((pitch) => getNaturalizedPitch(pitch)),
         stemDirection: getChordStemDirection(item.pitches, staffId),
       })
       : new StaveNote({
@@ -814,7 +956,18 @@ function createVisualNote(
 
   if (item.kind === 'note' && item.accidentals) {
     item.pitches.forEach((pitch, index) => {
-      const acc = item.accidentals?.[pitch]
+      const acc = getDisplayAccidentalForPitch(
+        pitch,
+        item.accidentals?.[pitch],
+        keySignature,
+      )
+      if (acc) {
+        note.addModifier(new VFAccidental(acc), index)
+      }
+    })
+  } else if (item.kind === 'note') {
+    item.pitches.forEach((pitch, index) => {
+      const acc = getDisplayAccidentalForPitch(pitch, null, keySignature)
       if (acc) {
         note.addModifier(new VFAccidental(acc), index)
       }
@@ -985,11 +1138,155 @@ function getPlaceholderDurationForLength(length: number): {
   return { baseDuration: '32', dots: 0 }
 }
 
+function isPowerOfTwoLength(length: number) {
+  return length > 0 && (length & (length - 1)) === 0
+}
+
+function hasBlockingNoteInRange(
+  items: ScoreItem[],
+  start: number,
+  end: number,
+) {
+  return items.some(
+    (item) =>
+      item.kind === 'note' &&
+      rangesOverlap(item.start, itemEnd(item), start, end),
+  )
+}
+
+function isRangeFilledByNotes(
+  items: ScoreItem[],
+  start: number,
+  end: number,
+) {
+  let subdivision = start
+
+  while (subdivision < end) {
+    const item = findCoveringItem(items, subdivision)
+    if (!item || item.kind !== 'note') {
+      return false
+    }
+
+    subdivision = Math.min(itemEnd(item), end)
+  }
+
+  return true
+}
+
+function canUseProgressivePlaceholderPlan(
+  items: ScoreItem[],
+  groupStart: number,
+  groupLength: number,
+  selectedLength: number,
+  subdivisionsPerMeasure: number,
+) {
+  const groupEnd = Math.min(groupStart + groupLength, subdivisionsPerMeasure)
+  const effectiveGroupLength = groupEnd - groupStart
+
+  if (
+    !isPowerOfTwoLength(effectiveGroupLength) ||
+    !isPowerOfTwoLength(selectedLength) ||
+    selectedLength > effectiveGroupLength
+  ) {
+    return false
+  }
+
+  return items
+    .filter(
+      (item) =>
+        item.kind === 'note' &&
+        rangesOverlap(item.start, itemEnd(item), groupStart, groupEnd),
+    )
+    .every(
+      (item) =>
+        item.start % selectedLength === 0 &&
+        getItemSubdivisions(item) % selectedLength === 0,
+    )
+}
+
+function buildProgressivePlaceholderSegments(
+  items: ScoreItem[],
+  start: number,
+  length: number,
+  selectedLength: number,
+): Array<{ length: number; start: number }> {
+  const end = start + length
+
+  if (!hasBlockingNoteInRange(items, start, end)) {
+    if (length <= selectedLength) {
+      return [{ length, start }]
+    }
+
+    const half = length / 2
+    if (!Number.isInteger(half) || half < selectedLength) {
+      return [{ length, start }]
+    }
+
+    return [
+      ...buildProgressivePlaceholderSegments(items, start, half, selectedLength),
+      { length: half, start: start + half },
+    ]
+  }
+
+  if (isRangeFilledByNotes(items, start, end) || length <= 1) {
+    return []
+  }
+
+  const half = length / 2
+  if (!Number.isInteger(half) || half < 1) {
+    return []
+  }
+
+  const leftStart = start
+  const rightStart = start + half
+  const leftEnd = rightStart
+  const rightEnd = end
+  const leftSegments = buildProgressivePlaceholderSegments(
+    items,
+    leftStart,
+    half,
+    selectedLength,
+  )
+  const rightSegments =
+    isRangeFilledByNotes(items, leftStart, leftEnd) ||
+    hasBlockingNoteInRange(items, rightStart, rightEnd)
+      ? buildProgressivePlaceholderSegments(items, rightStart, half, selectedLength)
+      : [{ length: half, start: rightStart }]
+
+  return [...leftSegments, ...rightSegments]
+}
+
+function buildProgressivePlaceholderPlan(
+  items: ScoreItem[],
+  groupStart: number,
+  groupLength: number,
+  selectedLength: number,
+  subdivisionsPerMeasure: number,
+) {
+  if (
+    !canUseProgressivePlaceholderPlan(
+      items,
+      groupStart,
+      groupLength,
+      selectedLength,
+      subdivisionsPerMeasure,
+    )
+  ) {
+    return null
+  }
+
+  return new Map(
+    buildProgressivePlaceholderSegments(items, groupStart, groupLength, selectedLength).map(
+      (segment) => [segment.start, segment.length],
+    ),
+  )
+}
+
 function getFocusedPlaceholderLength(
   items: ScoreItem[],
   subdivision: number,
   subdivisionsPerMeasure: number,
-  focusedBaseDuration: BaseDuration,
+  focusedDurationLength: number,
   cursorSubdivision: number | null,
   groupStart: number,
   groupLength: number,
@@ -997,7 +1294,7 @@ function getFocusedPlaceholderLength(
   const nextStart = findNextStartingItem(items, subdivision - 1)?.start ?? subdivisionsPerMeasure
   const groupEnd = groupStart + groupLength
   const maxLength = Math.max(1, Math.min(nextStart - subdivision, groupEnd - subdivision))
-  const preferredLength = getDurationSubdivisions(focusedBaseDuration, false)
+  const preferredLength = focusedDurationLength
 
   let bestL = 1
   for (const L of [32, 16, 8, 4, 2, 1]) {
@@ -1049,6 +1346,7 @@ function getPlaceholderLength(
 function buildStaffVoiceData(
   items: ScoreItem[],
   staffId: StaffId,
+  keySignature: KeySignatureSpec,
   activeItemId: string | null,
   eraseHoverItemId: string | null,
   noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>,
@@ -1056,7 +1354,7 @@ function buildStaffVoiceData(
   groupSubdivisionLengths: number[],
   measureIndex: number,
   placeholderFocus: PlaceholderFocus | null,
-  focusedBaseDuration: BaseDuration,
+  focusedDurationLength: number,
   cursorSubdivision: number | null,
 ) {
   const notes: StaveNote[] = []
@@ -1067,6 +1365,20 @@ function buildStaffVoiceData(
     placeholderFocus?.measureIndex === measureIndex &&
       placeholderFocus.staffId === staffId
       ? placeholderFocus.groupStart
+      : null
+  const focusedGroupLength =
+    focusedGroupStart !== null
+      ? getSubdivisionGroupInfo(focusedGroupStart, groupSubdivisionLengths).length
+      : null
+  const focusedPlaceholderPlan =
+    focusedGroupStart !== null && focusedGroupLength !== null
+      ? buildProgressivePlaceholderPlan(
+        items,
+        focusedGroupStart,
+        focusedGroupLength,
+        focusedDurationLength,
+        subdivisionsPerMeasure,
+      )
       : null
 
   while (subdivision < subdivisionsPerMeasure) {
@@ -1080,6 +1392,7 @@ function buildStaffVoiceData(
         createVisualNote(
           item,
           staffId,
+          keySignature,
           activeItemId,
           eraseHoverItemId,
           noteRegistry,
@@ -1095,17 +1408,23 @@ function buildStaffVoiceData(
       focusedGroupStart !== null &&
       subdivision >= focusedGroupStart &&
       subdivision < focusedGroupStart + groupInfo.length
-    const placeholderLength = isFocusedGroup
-      ? getFocusedPlaceholderLength(
+    const progressivePlaceholderLength =
+      isFocusedGroup && focusedPlaceholderPlan?.has(subdivision)
+        ? focusedPlaceholderPlan.get(subdivision) ?? null
+        : null
+    const placeholderLength =
+      progressivePlaceholderLength ??
+      (isFocusedGroup
+        ? getFocusedPlaceholderLength(
         items,
         subdivision,
         subdivisionsPerMeasure,
-        focusedBaseDuration,
+        focusedDurationLength,
         cursorSubdivision,
         focusedGroupStart!,
         groupInfo.length,
       )
-      : getPlaceholderLength(items, subdivision, subdivisionsPerMeasure, groupSubdivisionLengths)
+        : getPlaceholderLength(items, subdivision, subdivisionsPerMeasure, groupSubdivisionLengths))
     const placeholderDuration = getPlaceholderDurationForLength(placeholderLength)
     const isHighlighted = cursorSubdivision !== null && subdivision === cursorSubdivision
     lengths.push(placeholderLength)
@@ -1259,6 +1578,254 @@ function clampPreviewX(
   )
 }
 
+function getPreviewXForSubdivisionRange(
+  hitBox: Pick<MeasureHitBox, 'left' | 'right' | 'xBySubdivision'>,
+  subdivision: number,
+  length: number,
+  previewBaseDuration: BaseDuration,
+  previewDotted: boolean,
+) {
+  const lastSubdivision = Math.min(
+    subdivision + Math.max(length - 1, 0),
+    hitBox.xBySubdivision.length - 1,
+  )
+  const previewStartX =
+    hitBox.xBySubdivision[subdivision] ?? hitBox.xBySubdivision[0] ?? hitBox.left
+  const previewEndX = hitBox.xBySubdivision[lastSubdivision] ?? previewStartX
+
+  return clampPreviewX(
+    (previewStartX + previewEndX) / 2 - NOTE_VISUAL_SHIFT,
+    hitBox.left,
+    hitBox.right,
+    previewBaseDuration,
+    previewDotted,
+  )
+}
+
+function getScoreFrontPopoverWidth(kind: ScoreFrontPopover['kind']) {
+  return kind === 'timeSignature'
+    ? SCORE_FRONT_TIME_POPOVER_WIDTH
+    : SCORE_FRONT_KEY_POPOVER_WIDTH
+}
+
+function drawSystemMeasureNumber(
+  context: VexRenderContext,
+  systemLeftX: number,
+  trebleStave: Stave,
+  measureNumber: number,
+) {
+  const label = String(measureNumber)
+  const textWidth = context.measureText(label).width
+  const anchorX = systemLeftX + SYSTEM_MEASURE_NUMBER_OFFSET_X
+  const textX = anchorX - textWidth
+  const textY = trebleStave.getYForTopText(0) + SYSTEM_MEASURE_NUMBER_OFFSET_Y
+
+  context.save()
+  context.setFillStyle(NOTE_COLOR)
+  context.setFont('Arial, sans-serif', SYSTEM_MEASURE_NUMBER_FONT_SIZE, '700')
+  context.fillText(label, textX, textY)
+  context.restore()
+}
+
+function getSystemStartTimeSignaturePadding(keySignature: KeySignatureSpec) {
+  return keySignature === 'C' ? SYSTEM_NATURAL_KEY_PLACEHOLDER_PADDING : undefined
+}
+
+function applySystemStartFrontModifiers(
+  trebleStave: Stave,
+  bassStave: Stave,
+  keySignature: KeySignatureSpec,
+  timeSignature: TimeSignature,
+) {
+  const timeSignaturePadding = getSystemStartTimeSignaturePadding(keySignature)
+
+  trebleStave.addClef('treble')
+  bassStave.addClef('bass')
+
+  if (keySignature !== 'C') {
+    trebleStave.addKeySignature(keySignature)
+    bassStave.addKeySignature(keySignature)
+  }
+
+  trebleStave.addTimeSignature(timeSignature, timeSignaturePadding)
+  bassStave.addTimeSignature(timeSignature, timeSignaturePadding)
+}
+
+function getSystemFrontGeometry(stave: Stave) {
+  const noteStartX = stave.getNoteStartX()
+  const clef = stave.getModifiers(undefined, VFClef.CATEGORY)[0]
+  const timeModifier = stave.getModifiers(undefined, VFTimeSignature.CATEGORY)[0]
+
+  if (!clef || !timeModifier) {
+    return null
+  }
+
+  const clefRight = clef.getX() + clef.getWidth()
+  const timeLeft = timeModifier.getX()
+
+  return {
+    clefRight,
+    noteStartX,
+    timeLeft,
+  }
+}
+
+function drawNaturalKeySignaturePlaceholder(
+  context: VexRenderContext,
+  trebleStave: Stave,
+  bassStave: Stave,
+  frontGeometry: NonNullable<ReturnType<typeof getSystemFrontGeometry>>,
+) {
+  const label = '\u266E'
+  const slotCenterX = (frontGeometry.clefRight + frontGeometry.timeLeft) / 2
+
+  context.save()
+  context.setFillStyle('#475569')
+  context.setFont('Arial, sans-serif', SYSTEM_NATURAL_KEY_PLACEHOLDER_FONT_SIZE, '700')
+
+  for (const stave of [trebleStave, bassStave]) {
+    const textWidth = context.measureText(label).width
+    const textX = slotCenterX - textWidth / 2
+    const textY = stave.getYForGlyphs() + SYSTEM_NATURAL_KEY_PLACEHOLDER_OFFSET_Y
+    context.fillText(label, textX, textY)
+  }
+
+  context.restore()
+}
+
+function createScoreFrontHotspot(
+  kind: ScoreFrontHotspot['kind'],
+  measureIndex: number,
+  systemTop: number,
+  rawLeft: number,
+  rawRight: number,
+  minWidth: number,
+  bounds?: {
+    maxRight?: number
+    minLeft?: number
+  },
+) {
+  let left = rawLeft - SCORE_FRONT_HOTSPOT_PAD_X
+  let right = rawRight + SCORE_FRONT_HOTSPOT_PAD_X
+
+  if (bounds?.minLeft !== undefined) {
+    left = Math.max(left, bounds.minLeft)
+  }
+
+  if (bounds?.maxRight !== undefined) {
+    right = Math.min(right, bounds.maxRight)
+  }
+
+  if (right - left < minWidth) {
+    const center = (rawLeft + rawRight) / 2
+    left = center - minWidth / 2
+    right = center + minWidth / 2
+
+    if (bounds?.minLeft !== undefined && left < bounds.minLeft) {
+      right += bounds.minLeft - left
+      left = bounds.minLeft
+    }
+
+    if (bounds?.maxRight !== undefined && right > bounds.maxRight) {
+      left -= right - bounds.maxRight
+      right = bounds.maxRight
+    }
+  }
+
+  if (bounds?.minLeft !== undefined) {
+    left = Math.max(left, bounds.minLeft)
+  }
+
+  if (bounds?.maxRight !== undefined) {
+    right = Math.min(right, bounds.maxRight)
+  }
+
+  return {
+    height: SCORE_FRONT_HOTSPOT_HEIGHT,
+    kind,
+    left,
+    measureIndex,
+    top: systemTop,
+    width: Math.max(1, right - left),
+  } satisfies ScoreFrontHotspot
+}
+
+function buildScoreFrontHotspots(
+  systems: ReturnType<typeof buildSystems>,
+  scoreTop: number,
+  scoreWidth: number,
+  keySignature: KeySignatureSpec,
+  timeSignature: TimeSignature,
+) {
+  const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2
+
+  return systems.flatMap((system, systemIndex) => {
+    const firstEntry = system[0]
+
+    if (!firstEntry) {
+      return []
+    }
+
+    const rawSystemWidth = system.reduce((sum, entry) => sum + entry.width, 0)
+    const widthMultiplier = targetSystemWidth / rawSystemWidth
+    const renderedSystemWidth = rawSystemWidth * widthMultiplier
+    const systemLeft =
+      SYSTEM_SIDE_PADDING + Math.max(0, (targetSystemWidth - renderedSystemWidth) / 2)
+    const firstMeasureWidth = firstEntry.width * widthMultiplier
+    const trebleY = scoreTop + systemIndex * SYSTEM_GAP_Y
+    const systemTop = trebleY - 12
+    const stave = new Stave(systemLeft, trebleY, firstMeasureWidth)
+    stave.addClef('treble')
+
+    if (keySignature !== 'C') {
+      stave.addKeySignature(keySignature)
+    }
+
+    stave.addTimeSignature(timeSignature, getSystemStartTimeSignaturePadding(keySignature))
+    stave.format()
+
+    const frontGeometry = getSystemFrontGeometry(stave)
+
+    if (!frontGeometry) {
+      return []
+    }
+
+    const timeBoundaryLeft = frontGeometry.timeLeft - 2
+    const hotspots: ScoreFrontHotspot[] = []
+
+    hotspots.push(
+      createScoreFrontHotspot(
+        'keySignature',
+        firstEntry.measureIndex,
+        systemTop,
+        frontGeometry.clefRight + 4,
+        frontGeometry.timeLeft - 4,
+        SCORE_FRONT_KEY_MIN_WIDTH,
+        {
+          maxRight: timeBoundaryLeft,
+          minLeft: frontGeometry.clefRight + 2,
+        },
+      ),
+    )
+
+    hotspots.push(
+      createScoreFrontHotspot(
+        'timeSignature',
+        firstEntry.measureIndex,
+        systemTop,
+        frontGeometry.timeLeft,
+        frontGeometry.noteStartX,
+        SCORE_FRONT_TIME_MIN_WIDTH,
+        {
+          minLeft: timeBoundaryLeft,
+        },
+      ),
+    )
+
+    return hotspots
+  })
+}
+
 function applyFixedSubdivisionGrid(
   stave: Stave,
   anchorNotes: GhostNote[],
@@ -1384,9 +1951,13 @@ function HoverRestIndicator({
 }
 
 function PendingInsertIndicator({
+  baseDuration,
+  dotted,
   hitBoxes,
   position,
 }: {
+  baseDuration: BaseDuration
+  dotted: boolean
   hitBoxes: MeasureHitBox[]
   position: PendingInsertPreview
 }) {
@@ -1395,6 +1966,24 @@ function PendingInsertIndicator({
       box.index === position.measureIndex &&
       box.staffId === position.staffId,
   )
+  const previewLength = getDurationSubdivisions(baseDuration, dotted)
+  const previewX = hitBox
+    ? getPreviewXForSubdivisionRange(
+      hitBox,
+      position.subdivision,
+      previewLength,
+      baseDuration,
+      dotted,
+    )
+    : 0
+  const previewY = hitBox
+    ? pitchToY(
+      position.pitch,
+      hitBox.topLineY,
+      hitBox.spacing,
+      hitBox.staffId,
+    )
+    : 0
 
   const ledgerLines: number[] = []
 
@@ -1402,18 +1991,18 @@ function PendingInsertIndicator({
     const topLineY = hitBox.topLineY
     const bottomLineY = topLineY + hitBox.spacing * 4
 
-    if (position.previewY < topLineY - hitBox.spacing * 0.25) {
+    if (previewY < topLineY - hitBox.spacing * 0.25) {
       for (
         let lineY = topLineY - hitBox.spacing;
-        lineY >= position.previewY - hitBox.spacing * 0.5;
+        lineY >= previewY - hitBox.spacing * 0.5;
         lineY -= hitBox.spacing
       ) {
         ledgerLines.push(lineY)
       }
-    } else if (position.previewY > bottomLineY + hitBox.spacing * 0.25) {
+    } else if (previewY > bottomLineY + hitBox.spacing * 0.25) {
       for (
         let lineY = bottomLineY + hitBox.spacing;
-        lineY <= position.previewY + hitBox.spacing * 0.5;
+        lineY <= previewY + hitBox.spacing * 0.5;
         lineY += hitBox.spacing
       ) {
         ledgerLines.push(lineY)
@@ -1427,12 +2016,12 @@ function PendingInsertIndicator({
         <div
           key={lineY}
           className="pending-note-preview__ledger"
-          style={{ left: `${position.previewX}px`, top: `${lineY}px` }}
+          style={{ left: `${previewX}px`, top: `${lineY}px` }}
         />
       ))}
       <div
         className="pending-note-preview"
-        style={{ left: `${position.previewX}px`, top: `${position.previewY}px` }}
+        style={{ left: `${previewX}px`, top: `${previewY}px` }}
       />
     </>
   )
@@ -1466,6 +2055,7 @@ function App() {
   const [timeSignature, setTimeSignature] = useState<TimeSignature>(isPdfRenderMode ? '4/4' : '3/4')
   const [timeSignatureGrouping, setTimeSignatureGrouping] = useState<number[] | null>(null)
   const [keySignature, setKeySignature] = useState<KeySignatureSpec>('C')
+  const [transposeOnKeyChange, setTransposeOnKeyChange] = useState(false)
   const [activeTab, setActiveTab] = useState<ToolbarTab>('notes')
   const [mode, setMode] = useState<EditMode>('note')
   const [baseDuration, setBaseDuration] = useState<BaseDuration>('8')
@@ -1516,8 +2106,13 @@ function App() {
     [timeSignature, timeSignatureGrouping],
   )
   const systems = useMemo(
-    () => buildSystems(measures, timeSignature, timeSignatureGrouping, placeholderFocus, baseDuration),
-    [baseDuration, measures, placeholderFocus, timeSignature, timeSignatureGrouping],
+    () => buildSystems(
+      measures,
+      timeSignature,
+      timeSignatureGrouping,
+      availableScoreWidth,
+    ),
+    [availableScoreWidth, measures, timeSignature, timeSignatureGrouping],
   )
   const subdivisionsPerMeasure = useMemo(
     () => meterDefinition.subdivisionsPerMeasure,
@@ -1528,69 +2123,18 @@ function App() {
     [measures, tempoBpm, timeSignature],
   )
   const scoreTop = SCORE_CANVAS_TOP
-  const scoreWidth = Math.max(
-    availableScoreWidth,
-    systems.reduce(
-      (widest, system) =>
-        Math.max(
-          widest,
-          system.reduce((sum, entry) => sum + entry.width, 0) +
-          SYSTEM_SIDE_PADDING * 2,
-        ),
-      0,
-    ),
-  )
+  const scoreWidth = Math.max(SCORE_MIN_SURFACE_WIDTH, availableScoreWidth)
   const scoreHeight =
     scoreTop +
     (systems.length - 1) * SYSTEM_GAP_Y +
     GRAND_STAFF_GAP +
     120 +
     SCORE_PADDING_BOTTOM
-  const scoreFrontHotspots = useMemo<ScoreFrontHotspot[]>(() =>
-    systems.flatMap((system, systemIndex) => {
-      const firstEntry = system[0]
-
-      if (!firstEntry) {
-        return []
-      }
-
-      const systemTop = scoreTop + systemIndex * SYSTEM_GAP_Y - 12
-      const systemLeft = SYSTEM_SIDE_PADDING
-      const hotspots: ScoreFrontHotspot[] = []
-
-      if (systemIndex === 0) {
-        const keySigWidth = keySignature === 'C' ? 15 : 35;
-
-        hotspots.push({
-          height: SCORE_FRONT_HOTSPOT_HEIGHT,
-          kind: 'keySignature' as const,
-          left: systemLeft + 35,
-          measureIndex: firstEntry.measureIndex,
-          top: systemTop,
-          width: keySigWidth,
-        })
-        hotspots.push({
-          height: SCORE_FRONT_HOTSPOT_HEIGHT,
-          kind: 'timeSignature' as const,
-          left: systemLeft + 35 + keySigWidth,
-          measureIndex: firstEntry.measureIndex,
-          top: systemTop,
-          width: SCORE_FRONT_TIME_WIDTH,
-        })
-      } else {
-        hotspots.push({
-          height: SCORE_FRONT_HOTSPOT_HEIGHT,
-          kind: 'timeSignature' as const,
-          left: systemLeft + 35,
-          measureIndex: firstEntry.measureIndex,
-          top: systemTop,
-          width: SCORE_FRONT_TIME_WIDTH,
-        })
-      }
-
-      return hotspots
-    }),
-    [keySignature, scoreTop, systems])
+  const scoreFrontHotspots = useMemo<ScoreFrontHotspot[]>(
+    () => buildScoreFrontHotspots(systems, scoreTop, scoreWidth, keySignature, timeSignature),
+    [keySignature, scoreTop, scoreWidth, systems, timeSignature],
+  )
+  const selectedDurationLength = getDurationSubdivisions(baseDuration, dotted)
   const selectedDurationName = getDurationName(baseDuration, dotted)
   const activeSelection = useMemo(() => {
     if (!activeItemId) {
@@ -1620,7 +2164,7 @@ function App() {
   const activeTabTips = TAB_SIDEBAR_TIPS[activeTab]
   const activeKeySignatureLabel = getKeySignatureDisplayLabel(keySignature)
   const activeNoteLabel = activeNote
-    ? getPitchLabels(activeNote.pitches, activeNote.accidentals)
+    ? getPitchLabels(activeNote.pitches, activeNote.accidentals, keySignature)
     : 'No note selected'
   const boundedActiveMeasureIndex = Math.min(activeMeasureIndex, Math.max(measures.length - 1, 0))
   const activeMeasure = measures[boundedActiveMeasureIndex] ?? null
@@ -1628,7 +2172,6 @@ function App() {
     ? getEffectiveMeasureTempo(measures, boundedActiveMeasureIndex, tempoBpm)
     : tempoBpm
   const visibleHelpCard = helpCard ?? getToolbarTabHelp(activeTab)
-
   useEffect(() => {
     const noteIds = new Set(
       measures.flatMap((measure) =>
@@ -1728,24 +2271,6 @@ function App() {
     setMeasureTempoInput(String(activeMeasureTempo))
   }, [activeMeasureTempo, boundedActiveMeasureIndex])
 
-  useEffect(() => {
-    if (
-      activeTab !== 'notes' ||
-      mode !== 'note' ||
-      activeItemId ||
-      hoveredRestPosition ||
-      pendingInsertPreview ||
-      chordHoverPreview
-    ) {
-      return
-    }
-
-    const nextPosition = findFirstAvailableRestPosition(measures)
-    if (nextPosition) {
-      focusRestPosition(nextPosition)
-    }
-  }, [activeItemId, activeTab, chordHoverPreview, hoveredRestPosition, measures, mode, pendingInsertPreview])
-
   function clearScheduledPlayback() {
     scheduledTransportEventsRef.current.forEach((eventId) => {
       Tone.Transport.clear(eventId)
@@ -1819,20 +2344,19 @@ function App() {
     const hitBoxes: MeasureHitBox[] = []
     const renderedPdfSystemBounds: PdfSystemBound[] = []
 
-    const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2;
+    const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2
 
     systems.forEach((system, systemIndex) => {
-      let currentX = SYSTEM_SIDE_PADDING
       const trebleY = scoreTop + systemIndex * SYSTEM_GAP_Y
       const bassY = trebleY + GRAND_STAFF_GAP
       let systemTop = Number.POSITIVE_INFINITY
       let systemBottom = Number.NEGATIVE_INFINITY
 
       const rawSystemWidth = system.reduce((sum, entry) => sum + entry.width, 0)
-      const isLastSystem = systemIndex === systems.length - 1
-      const widthMultiplier = (isLastSystem && rawSystemWidth < targetSystemWidth * 0.5) 
-        ? 1 
-        : targetSystemWidth / rawSystemWidth
+      const widthMultiplier = targetSystemWidth / rawSystemWidth
+      const renderedSystemWidth = rawSystemWidth * widthMultiplier
+      let currentX =
+        SYSTEM_SIDE_PADDING + Math.max(0, (targetSystemWidth - renderedSystemWidth) / 2)
 
       system.forEach((entry, measureInSystem) => {
         const isSystemStart = measureInSystem === 0
@@ -1843,14 +2367,12 @@ function App() {
         const bassStave = new Stave(currentX, bassY, adjustedWidth)
 
         if (isSystemStart) {
-          trebleStave.addClef('treble')
-          bassStave.addClef('bass')
-          if (systemIndex === 0) {
-            trebleStave.addKeySignature(keySignature)
-            bassStave.addKeySignature(keySignature)
-          }
-          trebleStave.addTimeSignature(timeSignature)
-          bassStave.addTimeSignature(timeSignature)
+          applySystemStartFrontModifiers(
+            trebleStave,
+            bassStave,
+            keySignature,
+            timeSignature,
+          )
         }
 
         if (isFinalMeasure) {
@@ -1877,6 +2399,8 @@ function App() {
         trebleStave.setContext(context).draw()
         bassStave.setContext(context).draw()
 
+        const frontGeometry = isSystemStart ? getSystemFrontGeometry(trebleStave) : null
+
         if (isSystemStart) {
           new StaveConnector(trebleStave, bassStave)
             .setContext(context)
@@ -1894,6 +2418,24 @@ function App() {
           .setType('singleRight')
           .draw()
 
+        if (isSystemStart) {
+          drawSystemMeasureNumber(
+            context,
+            currentX,
+            trebleStave,
+            entry.measureIndex + 1,
+          )
+
+          if (keySignature === 'C' && frontGeometry) {
+            drawNaturalKeySignaturePlaceholder(
+              context,
+              trebleStave,
+              bassStave,
+              frontGeometry,
+            )
+          }
+        }
+
         const cursorPosition = pendingInsertPreview ?? hoveredRestPosition
         const trebleCursorSub =
           cursorPosition &&
@@ -1910,6 +2452,7 @@ function App() {
         const trebleData = buildStaffVoiceData(
           entry.measure.trebleItems,
           'treble',
+          keySignature,
           activeItemId,
           eraseHoverItemId,
           noteRegistry,
@@ -1917,12 +2460,13 @@ function App() {
           entry.groupSubdivisionLengths,
           entry.measureIndex,
           placeholderFocus,
-          baseDuration,
+          selectedDurationLength,
           trebleCursorSub,
         )
         const bassData = buildStaffVoiceData(
           entry.measure.bassItems,
           'bass',
+          keySignature,
           activeItemId,
           eraseHoverItemId,
           noteRegistry,
@@ -1930,7 +2474,7 @@ function App() {
           entry.groupSubdivisionLengths,
           entry.measureIndex,
           placeholderFocus,
-          baseDuration,
+          selectedDurationLength,
           bassCursorSub,
         )
 
@@ -2077,7 +2621,7 @@ function App() {
           if (
             !next ||
             next.item.kind !== 'note' ||
-            !haveSamePitches(item.pitches, next.item.pitches)
+            !haveSameNotePitches(item, next.item, keySignature)
           ) {
             return
           }
@@ -2212,13 +2756,6 @@ function App() {
     setChordHoverPreview(null)
   }
 
-  function findFirstAvailableRestPosition(sourceMeasures: MeasureData[]) {
-    return (
-      findNextRestPosition(sourceMeasures, 0, 'treble', 0) ??
-      findNextRestPosition(sourceMeasures, 0, 'bass', 0)
-    )
-  }
-
   function canInsertAtSubdivision(
     items: ScoreItem[],
     subdivision: number,
@@ -2232,39 +2769,116 @@ function App() {
     )
   }
 
-  function focusRestPosition(nextPosition: HoveredRestPosition | null) {
-    setHoveredRestPosition(nextPosition)
-
+  function getPlaceholderFocusForPosition(nextPosition: HoveredRestPosition | null) {
     if (!nextPosition) {
-      return
+      return null
     }
 
-    setPlaceholderFocus({
+    return {
       groupStart: getSubdivisionGroupInfo(
         nextPosition.subdivision,
         meterDefinition.groupSubdivisionLengths,
       ).start,
       measureIndex: nextPosition.measureIndex,
       staffId: nextPosition.staffId,
-    })
+    }
+  }
+
+  function setPlaceholderFocusForPosition(nextPosition: HoveredRestPosition | null) {
+    setPlaceholderFocus(getPlaceholderFocusForPosition(nextPosition))
   }
 
   function clearPendingInsertPreview() {
     setPendingInsertPreview(null)
+    setPlaceholderFocus(null)
+  }
+
+  function buildPendingInsertPreview(
+    nextPosition: HoveredRestPosition,
+    pitch: NotePitch,
+  ): PendingInsertPreview {
+    return {
+      measureIndex: nextPosition.measureIndex,
+      pitch,
+      staffId: nextPosition.staffId,
+      subdivision: nextPosition.subdivision,
+    }
+  }
+
+  function armPendingInsertPreviewForPosition(
+    nextPosition: HoveredRestPosition,
+    pitch: NotePitch,
+    statusMessage: string,
+  ) {
+    setPendingInsertPreview({
+      ...buildPendingInsertPreview(nextPosition, pitch),
+    })
+    setHoveredRestPosition(null)
+    setPlaceholderFocusForPosition(nextPosition)
+    setStatus(statusMessage)
+  }
+
+  function findFirstAvailableRestPositionInGroup(
+    sourceMeasures: MeasureData[],
+    measureIndex: number,
+    staffId: StaffId,
+    groupStart: number,
+  ): HoveredRestPosition | null {
+    const length = getDurationSubdivisions(baseDuration, dotted)
+    const groupInfo = getSubdivisionGroupInfo(
+      groupStart,
+      meterDefinition.groupSubdivisionLengths,
+    )
+    const groupEnd = Math.min(groupInfo.start + groupInfo.length, subdivisionsPerMeasure)
+    const items = getItemsForStaff(sourceMeasures[measureIndex], staffId)
+    const checked = new Set<number>()
+
+    for (let subdivision = groupInfo.start; subdivision < groupEnd; subdivision += 1) {
+      const snapped = snapSubdivision(
+        subdivision,
+        baseDuration,
+        dotted,
+        subdivisionsPerMeasure,
+      )
+
+      if (
+        snapped < groupInfo.start ||
+        snapped + length > groupEnd ||
+        checked.has(snapped)
+      ) {
+        continue
+      }
+      checked.add(snapped)
+
+      if (canInsertAtSubdivision(items, snapped, length)) {
+        return {
+          measureIndex,
+          staffId,
+          subdivision: snapped,
+        }
+      }
+    }
+
+    return null
   }
 
   function armPendingInsertPreview(pointerTarget: NonNullable<ReturnType<typeof resolvePointerTarget>>) {
-    setPendingInsertPreview({
-      measureIndex: pointerTarget.hitBox.index,
-      pitch: pointerTarget.pitch,
-      previewX: pointerTarget.previewX,
-      previewY: pointerTarget.previewY,
-      staffId: pointerTarget.hitBox.staffId,
-      subdivision: pointerTarget.snappedSubdivision,
-    })
-    setHoveredRestPosition(null)
-    setStatus(
-      `Insertion preview armed on ${pointerTarget.hitBox.staffId}. Move vertically if needed, then click again to place ${getPitchLabel(pointerTarget.pitch, accidental)}.`,
+    const nextPosition =
+      findFirstAvailableRestPositionInGroup(
+        measures,
+        pointerTarget.hitBox.index,
+        pointerTarget.hitBox.staffId,
+        pointerTarget.groupStart,
+      ) ?? {
+        measureIndex: pointerTarget.hitBox.index,
+        staffId: pointerTarget.hitBox.staffId,
+        subdivision: pointerTarget.snappedSubdivision,
+      }
+
+    armPendingInsertPreviewForPosition(
+      nextPosition,
+      pointerTarget.pitch,
+      `Insertion preview armed on ${pointerTarget.hitBox.staffId}. The next slot is locked to the left-most available rest in this bar group. Move vertically if needed, then click again to place ${getPitchLabel(pointerTarget.pitch, accidental, keySignature)}.`,
     )
   }
 
@@ -2344,16 +2958,26 @@ function App() {
   function mutateMeasures(
     updater: (draft: MeasureData[]) => {
       activeItemId?: string | null
+      pendingInsertPreview?: PendingInsertPreview | null
+      placeholderFocus?: PlaceholderFocus | null
       status?: string
     },
   ) {
     setMeasures((current) => {
       const draft = cloneMeasures(current)
       const result = updater(draft)
-      const normalized = normalizeMeasures(draft, subdivisionsPerMeasure)
+      const normalized = normalizeMeasures(draft, subdivisionsPerMeasure, keySignature)
 
       if (result.activeItemId !== undefined) {
         setActiveItemId(result.activeItemId)
+      }
+
+      if (result.pendingInsertPreview !== undefined) {
+        setPendingInsertPreview(result.pendingInsertPreview)
+      }
+
+      if (result.placeholderFocus !== undefined) {
+        setPlaceholderFocus(result.placeholderFocus)
       }
 
       if (result.status) {
@@ -2370,7 +2994,7 @@ function App() {
         await Tone.start()
       }
 
-      const tonePitch = toTonePitch(pitch, accidental)
+      const tonePitch = toTonePitch(pitch, accidental, keySignature)
 
       if (pianoRef.current?.loaded) {
         pianoRef.current.triggerAttackRelease(tonePitch, 0.45, Tone.now())
@@ -2394,7 +3018,6 @@ function App() {
     kind: 'note' | 'rest',
   ) {
     const length = getDurationSubdivisions(baseDuration, dotted)
-    let nextRestPosition: HoveredRestPosition | null = null
 
     if (length > subdivisionsPerMeasure) {
       setStatus(`${selectedDurationName} does not fit inside ${timeSignature}.`)
@@ -2407,6 +3030,12 @@ function App() {
       dotted,
       subdivisionsPerMeasure,
     )
+    const currentGroupStart = getSubdivisionGroupInfo(
+      start,
+      meterDefinition.groupSubdivisionLengths,
+    ).start
+    const noteInsertStatus = `Inserted ${getPitchLabel(pitch, accidental, keySignature)} on ${staffId} as a ${selectedDurationName.toLowerCase()} note.`
+    const restInsertStatus = `Inserted a ${selectedDurationName.toLowerCase()} rest on ${staffId}.`
 
     mutateMeasures((draft) => {
       const items = getItemsForStaff(draft[measureIndex], staffId)
@@ -2438,7 +3067,7 @@ function App() {
 
           return {
             activeItemId: null,
-            status: `Removed ${getPitchLabel(pitch, accidental)} from the ${staffId} chord.`,
+            status: `Removed ${getPitchLabel(pitch, accidental, keySignature)} from the ${staffId} chord.`,
           }
         }
 
@@ -2455,8 +3084,8 @@ function App() {
         return {
           activeItemId: matchingStartItem.id,
           status: pitchExists
-            ? `Updated ${staffId} chord: ${getPitchLabels(nextPitches, matchingStartItem.accidentals)}.`
-            : `Expanded ${staffId} chord: ${getPitchLabels(nextPitches, matchingStartItem.accidentals)}.`,
+            ? `Updated ${staffId} chord: ${getPitchLabels(nextPitches, matchingStartItem.accidentals, keySignature)}.`
+            : `Expanded ${staffId} chord: ${getPitchLabels(nextPitches, matchingStartItem.accidentals, keySignature)}.`,
         }
       }
 
@@ -2487,27 +3116,40 @@ function App() {
       replaceStaffItems(draft, measureIndex, staffId, filtered)
 
       if (kind === 'note') {
-        nextRestPosition = findNextRestPosition(
-          draft,
-          measureIndex,
-          staffId,
-          start + length,
-        )
+        const nextRestPosition =
+          findFirstAvailableRestPositionInGroup(
+            draft,
+            measureIndex,
+            staffId,
+            currentGroupStart,
+          ) ??
+          findNextRestPosition(
+            draft,
+            measureIndex,
+            staffId,
+            start + length,
+          )
+
+        return {
+          activeItemId: inserted.id,
+          pendingInsertPreview: nextRestPosition
+            ? buildPendingInsertPreview(nextRestPosition, pitch)
+            : null,
+          placeholderFocus: getPlaceholderFocusForPosition(nextRestPosition),
+          status: nextRestPosition
+            ? `${noteInsertStatus} The next left-most available slot is armed. Move vertically if needed, then click again to place the next note.`
+            : noteInsertStatus,
+        }
       }
 
       return {
         activeItemId: inserted.id,
-        status:
-          kind === 'note'
-            ? `Inserted ${getPitchLabel(pitch, accidental)} on ${staffId} as a ${selectedDurationName.toLowerCase()} note.`
-            : `Inserted a ${selectedDurationName.toLowerCase()} rest on ${staffId}.`,
+        status: restInsertStatus,
       }
     })
 
     if (kind === 'note') {
-      clearPendingInsertPreview()
       void playPreviewPitch(pitch)
-      focusRestPosition(nextRestPosition)
     }
   }
 
@@ -2572,7 +3214,7 @@ function App() {
         }
       }
 
-      if (!haveSamePitches(next.item.pitches, target.pitches)) {
+      if (!haveSameNotePitches(target, next.item, keySignature)) {
         return {
           activeItemId: target.id,
           status: 'Ties require the next note or chord to use the same pitches.',
@@ -2618,29 +3260,7 @@ function App() {
       snappedSubdivision,
       meterDefinition.groupSubdivisionLengths,
     ).start
-    const previewLength = getDurationSubdivisions(baseDuration, dotted)
-    const previewLastSubdivision = Math.min(
-      snappedSubdivision + Math.max(previewLength - 1, 0),
-      hitBox.xBySubdivision.length - 1,
-    )
-    const previewStartX =
-      hitBox.xBySubdivision[snappedSubdivision] ?? hitBox.xBySubdivision[0] ?? hitBox.left
-    const previewEndX =
-      hitBox.xBySubdivision[previewLastSubdivision] ?? previewStartX
-    const previewX = clampPreviewX(
-      (previewStartX + previewEndX) / 2 - NOTE_VISUAL_SHIFT,
-      hitBox.left,
-      hitBox.right,
-      baseDuration,
-      dotted,
-    )
     const pitch = yToPitch(y, hitBox.topLineY, hitBox.spacing, hitBox.staffId)
-    const previewY = pitchToY(
-      pitch,
-      hitBox.topLineY,
-      hitBox.spacing,
-      hitBox.staffId,
-    )
     const targetItem = findCoveringItem(
       getItemsForStaff(measures[hitBox.index], hitBox.staffId),
       rawSubdivision,
@@ -2650,8 +3270,6 @@ function App() {
       groupStart,
       hitBox,
       pitch,
-      previewX,
-      previewY,
       rawSubdivision,
       snappedSubdivision,
       targetItem,
@@ -2694,19 +3312,12 @@ function App() {
           pendingHitBox.spacing,
           pendingHitBox.staffId,
         )
-        const previewY = pitchToY(
-          pitch,
-          pendingHitBox.topLineY,
-          pendingHitBox.spacing,
-          pendingHitBox.staffId,
-        )
 
         setPendingInsertPreview((current) =>
           current
             ? {
               ...current,
               pitch,
-              previewY,
             }
             : current,
         )
@@ -2727,12 +3338,6 @@ function App() {
       setHoveredRestPosition(null)
       return
     }
-
-    setPlaceholderFocus({
-      groupStart: pointerTarget.groupStart,
-      measureIndex: pointerTarget.hitBox.index,
-      staffId: pointerTarget.hitBox.staffId,
-    })
 
     if (mode === 'note') {
       const snapped = snapSubdivision(
@@ -2755,12 +3360,7 @@ function App() {
       )
 
       if (!hasNoteConflict) {
-        setHoveredRestPosition({
-          measureIndex: mIdx,
-          previewY: pointerTarget.previewY,
-          staffId,
-          subdivision: snapped,
-        })
+        setHoveredRestPosition(null)
         setChordHoverPreview(null)
       } else {
         setHoveredRestPosition(null)
@@ -2779,8 +3379,6 @@ function App() {
           setChordHoverPreview({
             measureIndex: pointerTarget.hitBox.index,
             pitch: pointerTarget.pitch,
-            previewX: pointerTarget.previewX,
-            previewY: pointerTarget.previewY,
             staffId: pointerTarget.hitBox.staffId,
             subdivision: pointerTarget.snappedSubdivision,
           })
@@ -2849,11 +3447,6 @@ function App() {
       return
     }
 
-    setPlaceholderFocus({
-      groupStart: pointerTarget.groupStart,
-      measureIndex: pointerTarget.hitBox.index,
-      staffId: pointerTarget.hitBox.staffId,
-    })
     setActiveMeasureIndex(pointerTarget.hitBox.index)
 
     if (activeTab !== 'notes') {
@@ -2865,15 +3458,16 @@ function App() {
             pointerTarget.targetItem,
             pointerTarget.hitBox.index,
             pointerTarget.hitBox.staffId,
+            keySignature,
           ),
         )
         setStatus(
-          `Selected ${getPitchLabels(pointerTarget.targetItem.pitches, pointerTarget.targetItem.accidentals)}. ${TAB_SELECTION_HINT[activeTab] ?? 'Use the toolbar to edit it.'}`,
+          `Selected ${getPitchLabels(pointerTarget.targetItem.pitches, pointerTarget.targetItem.accidentals, keySignature)}. ${TAB_SELECTION_HINT[activeTab] ?? 'Use the toolbar to edit it.'}`,
         )
       } else {
         if (activeTab === 'bars') {
           focusMeasureSelection(pointerTarget.hitBox.index)
-          setStatus(`Selected bar ${pointerTarget.hitBox.index + 1}. Use the Measures toolbar to set its tempo mark.`)
+          setStatus(`Selected measure ${pointerTarget.hitBox.index + 1}. Use the Measures toolbar to set its tempo mark.`)
           return
         }
 
@@ -2926,7 +3520,7 @@ function App() {
         setActiveItemId(pointerTarget.targetItem.id)
         setHelpCard(MODE_HELP.slur)
         setStatus(
-          `Slur start armed on ${getPitchLabels(pointerTarget.targetItem.pitches, pointerTarget.targetItem.accidentals)}. Click the ending note next.`,
+          `Slur start armed on ${getPitchLabels(pointerTarget.targetItem.pitches, pointerTarget.targetItem.accidentals, keySignature)}. Click the ending note next.`,
         )
         return
       }
@@ -2976,10 +3570,11 @@ function App() {
           pointerTarget.targetItem,
           pointerTarget.hitBox.index,
           pointerTarget.hitBox.staffId,
+          keySignature,
         ),
       )
       setStatus(
-        `Selected ${getPitchLabels(pointerTarget.targetItem.pitches, pointerTarget.targetItem.accidentals)}. Click another pitch on this selected note to build a chord, or switch tabs to edit it.`,
+        `Selected ${getPitchLabels(pointerTarget.targetItem.pitches, pointerTarget.targetItem.accidentals, keySignature)}. Click another pitch on this selected note to build a chord, or switch tabs to edit it.`,
       )
       return
     }
@@ -3015,7 +3610,7 @@ function App() {
       return
     }
 
-    const notes = buildPlaybackNotes(measures, timeSignature, tempoBpm)
+    const notes = buildPlaybackNotes(measures, timeSignature, tempoBpm, keySignature)
     if (notes.length === 0) {
       setStatus('There are no notes to play yet.')
       return
@@ -3097,10 +3692,10 @@ function App() {
     setStatus(
       isMetronomeEnabled
         ? hasBarTempoMarks
-          ? `Playing with bar tempo marks and metronome.`
+          ? 'Playing with measure tempo marks and metronome.'
           : `Playing at ${tempoBpm} BPM with metronome.`
         : hasBarTempoMarks
-          ? 'Playing with bar tempo marks.'
+          ? 'Playing with measure tempo marks.'
           : `Playing at ${tempoBpm} BPM.`,
     )
   }
@@ -3117,7 +3712,7 @@ function App() {
     const parsedTempo = Number(measureTempoInput)
 
     if (!Number.isFinite(parsedTempo)) {
-      setStatus('Enter a BPM value before applying a bar tempo.')
+      setStatus('Enter a BPM value before applying a measure tempo.')
       return
     }
 
@@ -3134,7 +3729,7 @@ function App() {
     })
     setMeasureTempoInput(String(nextTempo))
     setHelpCard(BAR_ACTION_HELP.tempo)
-    setStatus(`Bar ${boundedActiveMeasureIndex + 1} tempo set to ${nextTempo} BPM.`)
+    setStatus(`Measure ${boundedActiveMeasureIndex + 1} tempo set to ${nextTempo} BPM.`)
   }
 
   function clearTempoFromActiveMeasure() {
@@ -3142,7 +3737,7 @@ function App() {
     const targetMeasure = draft[boundedActiveMeasureIndex]
 
     if (!targetMeasure?.tempoBpm) {
-      setStatus(`Bar ${boundedActiveMeasureIndex + 1} is already using the inherited tempo.`)
+      setStatus(`Measure ${boundedActiveMeasureIndex + 1} is already using the inherited tempo.`)
       return
     }
 
@@ -3157,7 +3752,7 @@ function App() {
     setMeasureTempoInput(String(inheritedTempo))
     setHelpCard(BAR_ACTION_HELP.tempo)
     setStatus(
-      `Cleared the explicit tempo from bar ${boundedActiveMeasureIndex + 1}. It now uses ${inheritedTempo} BPM.`,
+      `Cleared the explicit tempo from measure ${boundedActiveMeasureIndex + 1}. It now uses ${inheritedTempo} BPM.`,
     )
   }
 
@@ -3167,15 +3762,7 @@ function App() {
     clearPendingInsertPreview()
     setPendingSlurSelection(null)
     setScoreFrontPopover(null)
-
-    if (nextMode === 'note') {
-      const nextPosition = hoveredRestPosition ?? findFirstAvailableRestPosition(measures)
-      if (nextPosition) {
-        focusRestPosition(nextPosition)
-      }
-    } else {
-      setHoveredRestPosition(null)
-    }
+    setHoveredRestPosition(null)
   }
 
   function changeTimeSignature(
@@ -3202,6 +3789,7 @@ function App() {
     const { measures: nextMeasures, removedItemCount } = trimMeasuresForTimeSignature(
       measures,
       nextSubdivisionsPerMeasure,
+      keySignature,
     )
 
     setHelpCard(getTimeSignatureHelp(nextMeter.display, normalizedGroupingOverride))
@@ -3220,7 +3808,7 @@ function App() {
     setIsPlaying(false)
     setStatus(
       removedItemCount > 0
-        ? `Switched to ${nextMeter.display}. Removed ${removedItemCount} note or rest item(s) that no longer fit the new bar length.`
+        ? `Switched to ${nextMeter.display}. Removed ${removedItemCount} note or rest item(s) that no longer fit the new measure length.`
         : `Switched to ${nextMeter.display}. Existing notes and rests were preserved.`,
     )
   }
@@ -3255,6 +3843,42 @@ function App() {
     )
   }
 
+  function applyKeySignatureChange(
+    nextKeySignature: KeySignatureSpec,
+    shouldTranspose = transposeOnKeyChange,
+  ) {
+    if (nextKeySignature === keySignature) {
+      setScoreFrontPopover(null)
+      return
+    }
+
+    const transformedMeasures = shouldTranspose
+      ? transposeMeasuresForKeySignature(measures, keySignature, nextKeySignature)
+      : rewriteMeasuresForKeySignature(measures, keySignature, nextKeySignature)
+    const normalizedMeasures = normalizeMeasures(
+      transformedMeasures,
+      subdivisionsPerMeasure,
+      nextKeySignature,
+    )
+
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    setMeasures(normalizedMeasures)
+    setKeySignature(nextKeySignature)
+    setHelpCard(getKeySignatureHelp(nextKeySignature))
+    clearPendingInsertPreview()
+    setPendingSlurSelection(null)
+    setScoreFrontPopover(null)
+    clearHoverState()
+    setStatus(
+      shouldTranspose
+        ? `Key signature changed to ${getKeySignatureNames(nextKeySignature)} (${getKeySignatureMeta(nextKeySignature).countLabel}). Existing notes were transposed into the new key.`
+        : `Key signature changed to ${getKeySignatureNames(nextKeySignature)} (${getKeySignatureMeta(nextKeySignature).countLabel}). Existing notes kept their sounding pitch and were respelled for the new key.`,
+    )
+  }
+
 
 
   function openScoreFrontPopover(hotspot: ScoreFrontHotspot) {
@@ -3270,8 +3894,7 @@ function App() {
     setActiveTab('bars')
     setActiveMeasureIndex(hotspot.measureIndex)
     setScoreFrontPopover({
-      anchorLeft:
-        hotspot.left - (hotspot.kind === 'timeSignature' ? 32 : 18),
+      anchorCenter: hotspot.left + hotspot.width / 2,
       kind: hotspot.kind,
       measureIndex: hotspot.measureIndex,
       top: hotspot.top + hotspot.height - 20,
@@ -3279,12 +3902,12 @@ function App() {
     setHelpCard(
       hotspot.kind === 'timeSignature'
         ? getTimeSignatureHelp(timeSignature, timeSignatureGrouping)
-        : KEY_SIGNATURE_HELP[keySignature],
+        : getKeySignatureHelp(keySignature),
     )
     setStatus(
       hotspot.kind === 'timeSignature'
         ? 'Choose a time signature for the whole score.'
-        : 'Choose a key signature for the whole score.',
+        : `Choose a key signature for the whole score. Current: ${getKeySignatureNames(keySignature)}. ${getKeySignatureChangeModeDescription(transposeOnKeyChange)}`,
     )
   }
 
@@ -3301,7 +3924,7 @@ function App() {
     setPendingSlurSelection(null)
     setScoreFrontPopover(null)
     setHelpCard(BAR_ACTION_HELP.add)
-    setStatus('Added one bar. The layout wraps automatically as the score grows.')
+    setStatus('Added one measure. The layout wraps automatically as the score grows.')
   }
 
   function removeMeasure() {
@@ -3311,11 +3934,11 @@ function App() {
     setIsPlaying(false)
     setMeasures((current) => {
       if (current.length === 1) {
-        setStatus('At least one bar must remain.')
+        setStatus('At least one measure must remain.')
         return current
       }
 
-      return normalizeMeasures(current.slice(0, -1), subdivisionsPerMeasure)
+      return normalizeMeasures(current.slice(0, -1), subdivisionsPerMeasure, keySignature)
     })
 
     setActiveItemId(null)
@@ -3551,8 +4174,8 @@ function App() {
       target.articulation =
         target.articulation === nextArticulation ? undefined : nextArticulation
       return target.articulation
-        ? `Applied ${ARTICULATION_LABELS[target.articulation]} to ${getPitchLabels(target.pitches, target.accidentals)}.`
-        : `Removed articulation from ${getPitchLabels(target.pitches, target.accidentals)}.`
+        ? `Applied ${ARTICULATION_LABELS[target.articulation]} to ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
+        : `Removed articulation from ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
     })
   }
 
@@ -3563,7 +4186,7 @@ function App() {
     })
     updateSelectedNote((target) => {
       target.articulation = undefined
-      return `Cleared articulation from ${getPitchLabels(target.pitches, target.accidentals)}.`
+      return `Cleared articulation from ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
     })
   }
 
@@ -3572,8 +4195,8 @@ function App() {
     updateSelectedNote((target) => {
       target.ornament = target.ornament === nextOrnament ? undefined : nextOrnament
       return target.ornament
-        ? `Applied ${ORNAMENT_LABELS[target.ornament]} to ${getPitchLabels(target.pitches, target.accidentals)}.`
-        : `Removed ornament from ${getPitchLabels(target.pitches, target.accidentals)}.`
+        ? `Applied ${ORNAMENT_LABELS[target.ornament]} to ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
+        : `Removed ornament from ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
     })
   }
 
@@ -3584,7 +4207,7 @@ function App() {
     })
     updateSelectedNote((target) => {
       target.ornament = undefined
-      return `Cleared ornament from ${getPitchLabels(target.pitches, target.accidentals)}.`
+      return `Cleared ornament from ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
     })
   }
 
@@ -3593,8 +4216,8 @@ function App() {
     updateSelectedNote((target) => {
       target.dynamic = target.dynamic === nextDynamic ? undefined : nextDynamic
       return target.dynamic
-        ? `Applied ${target.dynamic} to ${getPitchLabels(target.pitches, target.accidentals)}.`
-        : `Removed dynamic from ${getPitchLabels(target.pitches, target.accidentals)}.`
+        ? `Applied ${target.dynamic} to ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
+        : `Removed dynamic from ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
     })
   }
 
@@ -3605,7 +4228,7 @@ function App() {
     })
     updateSelectedNote((target) => {
       target.dynamic = undefined
-      return `Cleared dynamic from ${getPitchLabels(target.pitches, target.accidentals)}.`
+      return `Cleared dynamic from ${getPitchLabels(target.pitches, target.accidentals, keySignature)}.`
     })
   }
 
@@ -3616,15 +4239,6 @@ function App() {
     setPendingSlurSelection(null)
     setScoreFrontPopover(null)
     clearHoverState()
-
-    if (nextTab === 'notes' && mode === 'note') {
-      const nextPosition = hoveredRestPosition ?? findFirstAvailableRestPosition(measures)
-      if (nextPosition) {
-        focusRestPosition(nextPosition)
-      }
-      return
-    }
-
     setHoveredRestPosition(null)
   }
 
@@ -3642,7 +4256,7 @@ function App() {
     setTimeSignatureGrouping(payload.timeSignatureGrouping)
     setKeySignature(payload.keySignature)
     setMeasures(
-      normalizeMeasures(payload.measures, importedMeter.subdivisionsPerMeasure),
+      normalizeMeasures(payload.measures, importedMeter.subdivisionsPerMeasure, payload.keySignature),
     )
     setSlurs(
       payload.slurs.map((slur) => ({
@@ -4098,7 +4712,7 @@ function App() {
                         onClick={() => {
                           setBaseDuration(option.baseDuration);
                           setDotted(option.dots === 1);
-                          setHelpCard(DURATION_HELP[option.baseDuration]);
+                          setHelpCard(getDurationHelp(option.baseDuration, option.dots === 1));
                         }}
                         title={option.label}
                         type="button"
@@ -4467,7 +5081,7 @@ function App() {
           <section className="panel panel--selection">
             <h2>Selection</h2>
             <div className="summary-row">
-              <span>Active bar</span>
+              <span>Active measure</span>
               <strong>{boundedActiveMeasureIndex + 1}</strong>
             </div>
             <div className="summary-row">
@@ -4482,7 +5096,7 @@ function App() {
               <span>Selected staff</span>
               <strong>
                 {activeSelection
-                  ? `${activeSelection.staffId} / Bar ${activeSelection.measureIndex + 1}`
+                  ? `${activeSelection.staffId} / Measure ${activeSelection.measureIndex + 1}`
                   : 'None'}
               </strong>
             </div>
@@ -4535,7 +5149,7 @@ function App() {
               <strong>{tempoBpm} BPM</strong>
             </div>
             <div className="summary-row">
-              <span>Bar Tempo</span>
+              <span>Measure Tempo</span>
               <strong>{activeMeasureTempo} BPM</strong>
             </div>
             <div className="summary-row">
@@ -4547,7 +5161,7 @@ function App() {
               <strong>{systems.length}</strong>
             </div>
             <div className="summary-row">
-              <span>Bars</span>
+              <span>Measures</span>
               <strong>{measures.length}</strong>
             </div>
           </section>
@@ -4557,7 +5171,7 @@ function App() {
             <ul>
               <li>Hover any rest slot to target it, click once to arm insertion, then click again to place the note.</li>
               <li>Treble and bass staves are fully independent — editing one never distorts the other.</li>
-              <li>Sixteenth rests are now evenly spaced within the beat and no longer overlap neighbouring quarter rests.</li>
+              <li>Semi-quaver (16th-note) rests are now evenly spaced within the beat and no longer overlap neighbouring crotchet (quarter-note) rests.</li>
             </ul>
           </section>
 
@@ -4644,6 +5258,8 @@ function App() {
                 ) : null}
                 {mode === 'note' && (pendingInsertPreview || chordHoverPreview) ? (
                   <PendingInsertIndicator
+                    baseDuration={baseDuration}
+                    dotted={dotted}
                     hitBoxes={hitBoxesRef.current}
                     position={(pendingInsertPreview || chordHoverPreview)!}
                   />
@@ -4674,8 +5290,8 @@ function App() {
                     key={`${hotspot.kind}-${hotspot.measureIndex}`}
                     aria-label={
                       hotspot.kind === 'timeSignature'
-                        ? 'Open time signature picker'
-                        : 'Open key signature picker'
+                        ? `Open time signature picker. Current: ${timeSignature}.`
+                        : `Open key signature picker. Current: ${getKeySignatureNames(keySignature)}.`
                     }
                     className={
                       scoreFrontPopover?.kind === hotspot.kind &&
@@ -4687,6 +5303,11 @@ function App() {
                       event.stopPropagation()
                       openScoreFrontPopover(hotspot)
                     }}
+                    title={
+                      hotspot.kind === 'timeSignature'
+                        ? `Time Signature: ${timeSignature}`
+                        : `Key Signature: ${getKeySignatureDisplayLabel(keySignature)}`
+                    }
                     style={{
                       height: `${hotspot.height}px`,
                       left: `${hotspot.left}px`,
@@ -4698,11 +5319,15 @@ function App() {
                 ))}
                 {scoreFrontPopover ? (
                   <div
-                    className="score-front-popover score-front-popover--time"
+                    className={
+                      scoreFrontPopover.kind === 'timeSignature'
+                        ? 'score-front-popover score-front-popover--time'
+                        : 'score-front-popover score-front-popover--key'
+                    }
                     style={(() => {
-                      const popoverWidth = SCORE_FRONT_TIME_POPOVER_WIDTH
+                      const popoverWidth = getScoreFrontPopoverWidth(scoreFrontPopover.kind)
                       const left = Math.min(
-                        Math.max(scoreFrontPopover.anchorLeft, 18),
+                        Math.max(scoreFrontPopover.anchorCenter - popoverWidth / 2, 18),
                         Math.max(scoreWidth - popoverWidth - 18, 18),
                       )
 
@@ -4721,6 +5346,11 @@ function App() {
                     >
                       Close
                     </button>
+                  </div>
+                  <div className="score-front-popover__meta">
+                    {scoreFrontPopover.kind === 'timeSignature'
+                      ? `Current: ${timeSignature}`
+                      : `Current: ${getKeySignatureDisplayLabel(keySignature)}`}
                   </div>
 
                   {scoreFrontPopover.kind === 'timeSignature' ? (
@@ -4781,26 +5411,39 @@ function App() {
                       </div>
                     </>
                   ) : (
-                    <div className="score-front-popover__row score-front-popover__row--key">
-                      {KEY_SIGNATURE_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          className={
-                            keySignature === option.value
-                              ? 'score-front-option active'
-                              : 'score-front-option'
-                          }
-                          onClick={() => {
-                            setKeySignature(option.value)
-                            setScoreFrontPopover(null)
-                          }}
-                          title={option.label}
-                          type="button"
-                        >
-                          {option.glyph}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      <div className="score-front-popover__key-mode">
+                        <label className="score-front-popover__checkbox">
+                          <input
+                            checked={transposeOnKeyChange}
+                            onChange={(event) => setTransposeOnKeyChange(event.target.checked)}
+                            type="checkbox"
+                          />
+                          <span>Transpose existing notes when changing key</span>
+                        </label>
+                        <div className="score-front-popover__hint">
+                          {getKeySignatureChangeModeDescription(transposeOnKeyChange)}
+                        </div>
+                      </div>
+                      <div className="score-front-popover__row score-front-popover__row--key">
+                        {KEY_SIGNATURE_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            className={
+                              keySignature === option.value
+                                ? 'score-front-option active'
+                                : 'score-front-option'
+                            }
+                            onClick={() => applyKeySignatureChange(option.value)}
+                            aria-label={getKeySignaturePickerTitle(option.value)}
+                            title={`${getKeySignaturePickerTitle(option.value)}. ${transposeOnKeyChange ? 'This will transpose existing notes.' : 'This will respell existing notes without transposing.'}`}
+                            type="button"
+                          >
+                            {option.glyph}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
                   </div>
                 ) : null}

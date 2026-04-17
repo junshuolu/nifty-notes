@@ -765,6 +765,7 @@ function splitSubdivisionsByGroups(
 function buildTieStopMap(
   measures: MeasureData[],
   timeSignature: TimeSignature,
+  keySignature: KeySignatureSpec,
 ) {
   const stopTargets = new Set<string>()
   const subdivisionsPerMeasure = parseTimeSignature(timeSignature).subdivisionsPerMeasure
@@ -786,7 +787,7 @@ function buildTieStopMap(
 
         if (
           next?.item.kind === 'note' &&
-          haveSamePitches(item.pitches, next.item.pitches)
+          haveSameNotePitches(item, next.item, keySignature)
         ) {
           stopTargets.add(next.item.id)
         }
@@ -811,17 +812,21 @@ function buildSlurMaps(slurs: MusicXmlScoreSlur[]) {
 }
 
 function getAccidentalTag(
-  note: NoteItem,
   pitch: string,
+  accidental: AccidentalType | undefined,
+  keySignature: KeySignatureSpec,
 ): string | null {
-  const explicit = note.accidentals?.[pitch]
-  if (explicit === '#') return 'sharp'
-  if (explicit === 'b') return 'flat'
-  if (explicit === 'n') return 'natural'
+  const displayAccidental = getDisplayAccidentalForPitch(
+    pitch,
+    accidental ?? null,
+    keySignature,
+  )
 
-  const { xmlAlter } = parsePitchToken(pitch)
-  if (xmlAlter === 2) return 'double-sharp'
-  if (xmlAlter === -2) return 'flat-flat'
+  if (displayAccidental === '##') return 'double-sharp'
+  if (displayAccidental === '#') return 'sharp'
+  if (displayAccidental === 'bb') return 'flat-flat'
+  if (displayAccidental === 'b') return 'flat'
+  if (displayAccidental === 'n') return 'natural'
   return null
 }
 
@@ -874,6 +879,7 @@ function pushNoteItem(
   tieStops: Set<string>,
   slurStarts: Map<string, number[]>,
   slurStops: Map<string, number[]>,
+  keySignature: KeySignatureSpec,
 ) {
   const tieStop = tieStops.has(item.id)
   const slurStartNumbers = slurStarts.get(item.id) ?? []
@@ -882,8 +888,17 @@ function pushNoteItem(
   const ornamentTag = item.ornament ? ORNAMENT_TO_MUSICXML[item.ornament] : null
 
   item.pitches.forEach((pitch, index) => {
-    const { letter, octave, xmlAlter } = parsePitchToken(pitch)
-    const accidentalTag = getAccidentalTag(item, pitch)
+    const { letter, octave } = parsePitchToken(pitch)
+    const effectiveAlter = getEffectiveAlterForPitch(
+      pitch,
+      item.accidentals?.[pitch],
+      keySignature,
+    )
+    const accidentalTag = getAccidentalTag(
+      pitch,
+      item.accidentals?.[pitch],
+      keySignature,
+    )
 
     lines.push('      <note>')
     if (index > 0) {
@@ -891,8 +906,8 @@ function pushNoteItem(
     }
     lines.push('        <pitch>')
     lines.push(`          <step>${letter.toUpperCase()}</step>`)
-    if (xmlAlter !== 0) {
-      lines.push(`          <alter>${xmlAlter}</alter>`)
+    if (effectiveAlter !== 0) {
+      lines.push(`          <alter>${effectiveAlter}</alter>`)
     }
     lines.push(`          <octave>${octave}</octave>`)
     lines.push('        </pitch>')
@@ -972,6 +987,7 @@ function pushStaffContents(
   tieStops: Set<string>,
   slurStarts: Map<string, number[]>,
   slurStops: Map<string, number[]>,
+  keySignature: KeySignatureSpec,
 ) {
   const staffNumber = staffId === 'treble' ? 1 : 2
   const items = [...getItemsForStaff(measure, staffId)].sort((left, right) => left.start - right.start)
@@ -994,7 +1010,7 @@ function pushStaffContents(
     }
 
     if (item.kind === 'note') {
-      pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops)
+      pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops, keySignature)
     } else {
       pushRestNote(lines, item.baseDuration, item.dots, staffNumber)
     }
@@ -1014,7 +1030,7 @@ function pushStaffContents(
 function buildMusicXmlDocument(payload: MusicXmlScorePayload): string {
   const { measures, keySignature, scoreArranger, scoreComposer, scoreLyricist, scoreSubtitle, scoreTitle, slurs, tempoBpm, timeSignature } = payload
   const { startMap: slurStarts, stopMap: slurStops } = buildSlurMaps(slurs)
-  const tieStops = buildTieStopMap(measures, timeSignature)
+  const tieStops = buildTieStopMap(measures, timeSignature, keySignature)
   const meter = parseTimeSignature(timeSignature, payload.timeSignatureGrouping)
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -1087,6 +1103,7 @@ function buildMusicXmlDocument(payload: MusicXmlScorePayload): string {
       tieStops,
       slurStarts,
       slurStops,
+      keySignature,
     )
 
     lines.push('      <backup>')
@@ -1102,6 +1119,7 @@ function buildMusicXmlDocument(payload: MusicXmlScorePayload): string {
       tieStops,
       slurStarts,
       slurStops,
+      keySignature,
     )
 
     lines.push('    </measure>')
@@ -1168,6 +1186,7 @@ export async function importMusicXMLViaBackend(xml: string): Promise<MusicXmlSco
 }
 import {
   STAFF_IDS,
+  type AccidentalType,
   type ArticulationType,
   type BaseDuration,
   type DynamicType,
@@ -1180,9 +1199,11 @@ import {
 } from './constants'
 import {
   findNextContiguousItem,
+  getDisplayAccidentalForPitch,
+  getEffectiveAlterForPitch,
   getItemSubdivisions,
   getItemsForStaff,
-  haveSamePitches,
+  haveSameNotePitches,
   parsePitchToken,
   parseTimeSignature,
 } from './score'

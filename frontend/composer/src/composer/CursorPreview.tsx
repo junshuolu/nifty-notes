@@ -22,7 +22,7 @@ export function CursorPreview({
       style={{ left: `${preview.x}px`, top: `${preview.y}px` }}
     >
       <div
-        className={`cursor-note cursor-note--${getDurationPreviewClass(baseDuration)}`}
+        className={`cursor-note cursor-note--${getDurationPreviewClass(baseDuration, dotted)}`}
       >
         <span className="cursor-head" />
         {baseDuration !== 'w' ? <span className="cursor-stem" /> : null}

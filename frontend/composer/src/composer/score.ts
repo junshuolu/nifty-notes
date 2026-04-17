@@ -15,6 +15,7 @@ import {
   type AccidentalType,
   type BaseDuration,
   type ContiguousTarget,
+  type KeySignatureSpec,
   type MeasureData,
   type NotePitch,
   type NoteItem,
@@ -43,6 +44,64 @@ export interface ParsedTimeSignature {
 
 const WHOLE_NOTE_SUBDIVISIONS = BASE_DURATION_SUBDIVISIONS.w
 const SUPPORTED_TIME_SIGNATURE_DENOMINATORS = new Set([2, 4, 8, 16])
+const LETTER_SEQUENCE = ['c', 'd', 'e', 'f', 'g', 'a', 'b'] as const
+const LETTER_TO_SEMITONE: Record<(typeof LETTER_SEQUENCE)[number], number> = {
+  a: 9,
+  b: 11,
+  c: 0,
+  d: 2,
+  e: 4,
+  f: 5,
+  g: 7,
+}
+const SHARP_ORDER = ['f', 'c', 'g', 'd', 'a', 'e', 'b'] as const
+const FLAT_ORDER = ['b', 'e', 'a', 'd', 'g', 'c', 'f'] as const
+const KEY_SIGNATURE_TO_FIFTHS: Record<KeySignatureSpec, number> = {
+  A: 3,
+  Ab: -4,
+  B: 5,
+  Bb: -2,
+  C: 0,
+  'C#': 7,
+  Cb: -7,
+  D: 2,
+  Db: -5,
+  E: 4,
+  Eb: -3,
+  F: -1,
+  'F#': 6,
+  G: 1,
+  Gb: -6,
+}
+const KEY_SIGNATURE_MAJOR_ROOT: Record<KeySignatureSpec, { alter: -1 | 0 | 1; letter: (typeof LETTER_SEQUENCE)[number] }> = {
+  A: { alter: 0, letter: 'a' },
+  Ab: { alter: -1, letter: 'a' },
+  B: { alter: 0, letter: 'b' },
+  Bb: { alter: -1, letter: 'b' },
+  C: { alter: 0, letter: 'c' },
+  'C#': { alter: 1, letter: 'c' },
+  Cb: { alter: -1, letter: 'c' },
+  D: { alter: 0, letter: 'd' },
+  Db: { alter: -1, letter: 'd' },
+  E: { alter: 0, letter: 'e' },
+  Eb: { alter: -1, letter: 'e' },
+  F: { alter: 0, letter: 'f' },
+  'F#': { alter: 1, letter: 'f' },
+  G: { alter: 0, letter: 'g' },
+  Gb: { alter: -1, letter: 'g' },
+}
+const MIDI_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+
+type LetterName = (typeof LETTER_SEQUENCE)[number]
+type RenderAccidental = AccidentalType | '##' | 'bb'
+type PitchRepresentation = {
+  accidental?: AccidentalType
+  pitch: NotePitch
+}
+type KeySignatureInterval = {
+  letterShift: number
+  semitoneShift: number
+}
 
 function getDefaultGrouping(
   numerator: number,
@@ -195,21 +254,30 @@ export function getItemSubdivisions(item: ScoreItem): number {
 }
 
 export function getDurationName(baseDuration: BaseDuration, dotted: boolean): string {
-  const baseLabel = DURATION_OPTIONS.find(
-    (option) => option.baseDuration === baseDuration,
+  const exactLabel = DURATION_OPTIONS.find(
+    (option) => option.baseDuration === baseDuration && option.dots === (dotted ? 1 : 0),
   )?.label
 
-  if (!baseLabel) {
-    return 'Quarter'
+  if (exactLabel) {
+    return exactLabel
   }
 
-  return dotted ? `Dotted ${baseLabel}` : baseLabel
+  return (
+    DURATION_OPTIONS.find(
+      (option) => option.baseDuration === baseDuration && option.dots === 0,
+    )?.label ?? 'Crotchet (Quarter Note)'
+  )
 }
 
-export function getDurationPreviewClass(baseDuration: BaseDuration): string {
+export function getDurationPreviewClass(baseDuration: BaseDuration, dotted = false): string {
   return (
-    DURATION_OPTIONS.find((option) => option.baseDuration === baseDuration)
-      ?.previewClass ?? 'quarter'
+    DURATION_OPTIONS.find(
+      (option) => option.baseDuration === baseDuration && option.dots === (dotted ? 1 : 0),
+    )?.previewClass ??
+    DURATION_OPTIONS.find(
+      (option) => option.baseDuration === baseDuration && option.dots === 0,
+    )?.previewClass ??
+    'quarter'
   )
 }
 
@@ -245,25 +313,331 @@ export function parsePitchToken(pitch: NotePitch) {
   }
 }
 
-function getResolvedPitchAccidental(
+function getAccidentalAlter(accidental?: RenderAccidental | null): -2 | -1 | 0 | 1 | 2 | null {
+  if (accidental === '##') return 2
+  if (accidental === '#') return 1
+  if (accidental === 'bb') return -2
+  if (accidental === 'b') return -1
+  if (accidental === 'n') return 0
+  return null
+}
+
+function getAccidentalTokenFromAlter(alter: number): RenderAccidental | 'n' | null {
+  if (alter === 2) return '##'
+  if (alter === 1) return '#'
+  if (alter === 0) return 'n'
+  if (alter === -1) return 'b'
+  if (alter === -2) return 'bb'
+  return null
+}
+
+function getLetterIndex(letter: string): number {
+  return LETTER_SEQUENCE.indexOf(letter as LetterName)
+}
+
+function getLetterPitchClass(letter: LetterName) {
+  return LETTER_TO_SEMITONE[letter]
+}
+
+function getNaturalMidi(letter: LetterName, octave: number) {
+  return (octave + 1) * 12 + getLetterPitchClass(letter)
+}
+
+function getStepNumber(letter: LetterName, octave: number) {
+  return octave * LETTER_SEQUENCE.length + getLetterIndex(letter)
+}
+
+function mod(value: number, divisor: number) {
+  return ((value % divisor) + divisor) % divisor
+}
+
+function getStepFromNumber(stepNumber: number): { letter: LetterName; octave: number } {
+  const letterIndex = mod(stepNumber, LETTER_SEQUENCE.length)
+  const octave = Math.floor((stepNumber - letterIndex) / LETTER_SEQUENCE.length)
+  return {
+    letter: LETTER_SEQUENCE[letterIndex] ?? 'c',
+    octave,
+  }
+}
+
+export function getKeySignatureAlterForLetter(
+  keySignature: KeySignatureSpec,
+  letter: string,
+): -1 | 0 | 1 {
+  const fifths = KEY_SIGNATURE_TO_FIFTHS[keySignature]
+
+  if (fifths > 0 && SHARP_ORDER.slice(0, fifths).includes(letter as LetterName)) {
+    return 1
+  }
+
+  if (fifths < 0 && FLAT_ORDER.slice(0, Math.abs(fifths)).includes(letter as LetterName)) {
+    return -1
+  }
+
+  return 0
+}
+
+export function getEffectiveAlterForPitch(
   pitch: NotePitch,
-  accidental?: AccidentalType | null,
-): '' | '#' | 'b' {
-  if (accidental === '#' || accidental === 'b') {
+  accidental: RenderAccidental | null | undefined,
+  keySignature: KeySignatureSpec = 'C',
+): number {
+  const explicitAlter = getAccidentalAlter(accidental)
+  if (explicitAlter !== null) {
+    return explicitAlter
+  }
+
+  const parsed = parsePitchToken(pitch)
+  if (parsed.xmlAlter !== 0) {
+    return parsed.xmlAlter
+  }
+
+  return getKeySignatureAlterForLetter(keySignature, parsed.letter)
+}
+
+export function getDisplayAccidentalForPitch(
+  pitch: NotePitch,
+  accidental: RenderAccidental | null | undefined,
+  keySignature: KeySignatureSpec = 'C',
+): RenderAccidental | 'n' | null {
+  if (accidental) {
     return accidental
   }
 
-  if (accidental === 'n') {
-    return ''
+  const parsed = parsePitchToken(pitch)
+  const keyAlter = getKeySignatureAlterForLetter(keySignature, parsed.letter)
+  const effectiveAlter = getEffectiveAlterForPitch(pitch, accidental, keySignature)
+
+  if (effectiveAlter === keyAlter) {
+    return null
   }
 
-  return parsePitchToken(pitch).embeddedAccidental
+  return getAccidentalTokenFromAlter(effectiveAlter)
 }
 
-export function toTonePitch(pitch: NotePitch, accidental?: AccidentalType | null): string {
+export function getNaturalizedPitch(pitch: NotePitch): NotePitch {
+  return parsePitchToken(pitch).naturalPitch
+}
+
+export function getMidiForPitch(
+  pitch: NotePitch,
+  accidental?: RenderAccidental | null,
+  keySignature: KeySignatureSpec = 'C',
+): number {
   const { letter, octave } = parsePitchToken(pitch)
-  const acc = getResolvedPitchAccidental(pitch, accidental)
-  return `${letter.toUpperCase()}${acc}${octave}`
+  return (
+    getNaturalMidi(letter as LetterName, Number(octave)) +
+    getEffectiveAlterForPitch(pitch, accidental, keySignature)
+  )
+}
+
+function getPitchRepresentationForKey(
+  letter: LetterName,
+  octave: number,
+  effectiveAlter: number,
+  keySignature: KeySignatureSpec,
+): PitchRepresentation {
+  const naturalPitch = `${letter}/${octave}` as NotePitch
+  const keyAlter = getKeySignatureAlterForLetter(keySignature, letter)
+
+  if (effectiveAlter === keyAlter) {
+    return { pitch: naturalPitch }
+  }
+
+  if (effectiveAlter === 0) {
+    return keyAlter === 0
+      ? { pitch: naturalPitch }
+      : { accidental: 'n', pitch: naturalPitch }
+  }
+
+  if (effectiveAlter === 1) {
+    return keyAlter === 1
+      ? { pitch: naturalPitch }
+      : { accidental: '#', pitch: naturalPitch }
+  }
+
+  if (effectiveAlter === -1) {
+    return keyAlter === -1
+      ? { pitch: naturalPitch }
+      : { accidental: 'b', pitch: naturalPitch }
+  }
+
+  const suffix = effectiveAlter === 2 ? '##' : effectiveAlter === -2 ? 'bb' : ''
+  return { pitch: `${letter}${suffix}/${octave}` as NotePitch }
+}
+
+export function rewritePitchForKeySignature(
+  pitch: NotePitch,
+  accidental: AccidentalType | null | undefined,
+  sourceKeySignature: KeySignatureSpec,
+  targetKeySignature: KeySignatureSpec,
+): PitchRepresentation {
+  const { letter, octave } = parsePitchToken(pitch)
+  const effectiveAlter = getEffectiveAlterForPitch(pitch, accidental, sourceKeySignature)
+  return getPitchRepresentationForKey(
+    letter as LetterName,
+    Number(octave),
+    effectiveAlter,
+    targetKeySignature,
+  )
+}
+
+function getKeySignatureInterval(
+  sourceKeySignature: KeySignatureSpec,
+  targetKeySignature: KeySignatureSpec,
+): KeySignatureInterval {
+  const sourceRoot = KEY_SIGNATURE_MAJOR_ROOT[sourceKeySignature]
+  const targetRoot = KEY_SIGNATURE_MAJOR_ROOT[targetKeySignature]
+  const sourcePitchClass = mod(
+    getLetterPitchClass(sourceRoot.letter) + sourceRoot.alter,
+    MIDI_NOTE_NAMES.length,
+  )
+  const targetPitchClass = mod(
+    getLetterPitchClass(targetRoot.letter) + targetRoot.alter,
+    MIDI_NOTE_NAMES.length,
+  )
+
+  if (sourcePitchClass === targetPitchClass) {
+    return { letterShift: 0, semitoneShift: 0 }
+  }
+
+  const upSemitoneShift = mod(targetPitchClass - sourcePitchClass, MIDI_NOTE_NAMES.length)
+  const downSemitoneShift = upSemitoneShift - MIDI_NOTE_NAMES.length
+  const upLetterShift = mod(
+    getLetterIndex(targetRoot.letter) - getLetterIndex(sourceRoot.letter),
+    LETTER_SEQUENCE.length,
+  )
+  const downLetterShift = upLetterShift - LETTER_SEQUENCE.length
+
+  if (Math.abs(downSemitoneShift) < Math.abs(upSemitoneShift)) {
+    return { letterShift: downLetterShift, semitoneShift: downSemitoneShift }
+  }
+
+  return { letterShift: upLetterShift, semitoneShift: upSemitoneShift }
+}
+
+export function transposePitchForKeySignature(
+  pitch: NotePitch,
+  accidental: AccidentalType | null | undefined,
+  sourceKeySignature: KeySignatureSpec,
+  targetKeySignature: KeySignatureSpec,
+): PitchRepresentation {
+  const interval = getKeySignatureInterval(sourceKeySignature, targetKeySignature)
+  const { letter, octave } = parsePitchToken(pitch)
+  const sourceMidi = getMidiForPitch(pitch, accidental, sourceKeySignature)
+  const nextStep = getStepNumber(letter as LetterName, Number(octave)) + interval.letterShift
+  const transposedStep = getStepFromNumber(nextStep)
+  const targetMidi = sourceMidi + interval.semitoneShift
+  const naturalTargetMidi = getNaturalMidi(transposedStep.letter, transposedStep.octave)
+  const effectiveAlter = targetMidi - naturalTargetMidi
+
+  return getPitchRepresentationForKey(
+    transposedStep.letter,
+    transposedStep.octave,
+    effectiveAlter,
+    targetKeySignature,
+  )
+}
+
+function mapNoteToKeySignature(
+  note: NoteItem,
+  transform: (pitch: NotePitch, accidental: AccidentalType | null | undefined) => PitchRepresentation,
+): NoteItem {
+  const nextPitches: NotePitch[] = []
+  const nextAccidentals: Record<string, AccidentalType> = {}
+
+  note.pitches.forEach((pitch) => {
+    const next = transform(pitch, note.accidentals?.[pitch])
+    nextPitches.push(next.pitch)
+    if (next.accidental) {
+      nextAccidentals[next.pitch] = next.accidental
+    }
+  })
+
+  return {
+    ...note,
+    accidentals: Object.keys(nextAccidentals).length > 0 ? nextAccidentals : undefined,
+    pitches: [...new Set(nextPitches)],
+  }
+}
+
+export function rewriteMeasuresForKeySignature(
+  measures: MeasureData[],
+  sourceKeySignature: KeySignatureSpec,
+  targetKeySignature: KeySignatureSpec,
+): MeasureData[] {
+  return cloneMeasures(measures).map((measure) => ({
+    ...measure,
+    bassItems: measure.bassItems.map((item) =>
+      item.kind === 'note'
+        ? mapNoteToKeySignature(item, (pitch, accidental) =>
+            rewritePitchForKeySignature(
+              pitch,
+              accidental,
+              sourceKeySignature,
+              targetKeySignature,
+            ),
+          )
+        : item,
+    ),
+    trebleItems: measure.trebleItems.map((item) =>
+      item.kind === 'note'
+        ? mapNoteToKeySignature(item, (pitch, accidental) =>
+            rewritePitchForKeySignature(
+              pitch,
+              accidental,
+              sourceKeySignature,
+              targetKeySignature,
+            ),
+          )
+        : item,
+    ),
+  }))
+}
+
+export function transposeMeasuresForKeySignature(
+  measures: MeasureData[],
+  sourceKeySignature: KeySignatureSpec,
+  targetKeySignature: KeySignatureSpec,
+): MeasureData[] {
+  return cloneMeasures(measures).map((measure) => ({
+    ...measure,
+    bassItems: measure.bassItems.map((item) =>
+      item.kind === 'note'
+        ? mapNoteToKeySignature(item, (pitch, accidental) =>
+            transposePitchForKeySignature(
+              pitch,
+              accidental,
+              sourceKeySignature,
+              targetKeySignature,
+            ),
+          )
+        : item,
+    ),
+    trebleItems: measure.trebleItems.map((item) =>
+      item.kind === 'note'
+        ? mapNoteToKeySignature(item, (pitch, accidental) =>
+            transposePitchForKeySignature(
+              pitch,
+              accidental,
+              sourceKeySignature,
+              targetKeySignature,
+            ),
+          )
+        : item,
+    ),
+  }))
+}
+
+export function toTonePitch(
+  pitch: NotePitch,
+  accidental?: RenderAccidental | null,
+  keySignature: KeySignatureSpec = 'C',
+): string {
+  const midi = getMidiForPitch(pitch, accidental, keySignature)
+  const pitchClass = mod(midi, MIDI_NOTE_NAMES.length)
+  const octave = Math.floor(midi / MIDI_NOTE_NAMES.length) - 1
+  return `${MIDI_NOTE_NAMES[pitchClass] ?? 'C'}${octave}`
 }
 
 export function cloneMeasures(measures: MeasureData[]): MeasureData[] {
@@ -406,9 +780,29 @@ export function haveSamePitches(
   )
 }
 
+export function haveSameNotePitches(
+  left: NoteItem,
+  right: NoteItem,
+  keySignature: KeySignatureSpec = 'C',
+): boolean {
+  if (left.pitches.length !== right.pitches.length) {
+    return false
+  }
+
+  const leftMidi = left.pitches
+    .map((pitch) => getMidiForPitch(pitch, left.accidentals?.[pitch], keySignature))
+    .sort((a, b) => a - b)
+  const rightMidi = right.pitches
+    .map((pitch) => getMidiForPitch(pitch, right.accidentals?.[pitch], keySignature))
+    .sort((a, b) => a - b)
+
+  return leftMidi.every((value, index) => value === rightMidi[index])
+}
+
 export function normalizeMeasures(
   measures: MeasureData[],
   subdivisionsPerMeasure: number,
+  keySignature: KeySignatureSpec = 'C',
 ): MeasureData[] {
   const cloned = cloneMeasures(measures)
 
@@ -436,7 +830,7 @@ export function normalizeMeasures(
         const validTarget =
           item.kind === 'note' &&
           next?.item.kind === 'note' &&
-          haveSamePitches(item.pitches, next.item.pitches)
+          haveSameNotePitches(item, next.item, keySignature)
 
         if (!validTarget) {
           item.tieToNext = false
@@ -452,6 +846,7 @@ export function buildPlaybackNotes(
   measures: MeasureData[],
   timeSignature: TimeSignature,
   defaultBpm: number,
+  keySignature: KeySignatureSpec = 'C',
 ) {
   const measureTimings = getMeasureTempoTimeline(measures, timeSignature, defaultBpm)
   const subdivisionsPerMeasure = getMeasureSubdivisions(timeSignature)
@@ -490,7 +885,7 @@ export function buildPlaybackNotes(
           if (
             !next ||
             next.item.kind !== 'note' ||
-            !haveSamePitches(next.item.pitches, item.pitches)
+            !haveSameNotePitches(next.item, item, keySignature)
           ) {
             break
           }
@@ -506,7 +901,7 @@ export function buildPlaybackNotes(
 
         segments.push({
           durationSeconds: totalDurationSeconds,
-          notes: item.pitches.map((p) => toTonePitch(p, item.accidentals?.[p])),
+          notes: item.pitches.map((p) => toTonePitch(p, item.accidentals?.[p], keySignature)),
           startSeconds:
             (measureTimings[measureIndex]?.startSeconds ?? 0) +
             item.start *
@@ -561,22 +956,34 @@ export function pitchToY(
   return topLineY + (safeIndex - getTopLineIndex(staffId)) * (spacing / 2)
 }
 
-export function getPitchLabel(pitch: NotePitch, accidental?: AccidentalType | null): string {
+export function getPitchLabel(
+  pitch: NotePitch,
+  accidental?: AccidentalType | null,
+  keySignature: KeySignatureSpec = 'C',
+): string {
   const { letter, octave } = parsePitchToken(pitch)
-  const resolvedAccidental = getResolvedPitchAccidental(pitch, accidental)
+  const resolvedAccidental = getDisplayAccidentalForPitch(pitch, accidental, keySignature)
   const accSymbol =
-    accidental === 'n'
+    resolvedAccidental === 'n'
       ? '\u266E'
       : resolvedAccidental === '#'
         ? '\u266F'
         : resolvedAccidental === 'b'
           ? '\u266D'
+          : resolvedAccidental === '##'
+            ? '\u266F\u266F'
+            : resolvedAccidental === 'bb'
+              ? '\u266D\u266D'
           : ''
   return `${letter.toUpperCase()}${accSymbol}${octave}`
 }
 
-export function getPitchLabels(pitches: NotePitch[], accidentals?: Record<string, AccidentalType>): string {
-  return pitches.map((p) => getPitchLabel(p, accidentals?.[p])).join(' + ')
+export function getPitchLabels(
+  pitches: NotePitch[],
+  accidentals?: Record<string, AccidentalType>,
+  keySignature: KeySignatureSpec = 'C',
+): string {
+  return pitches.map((p) => getPitchLabel(p, accidentals?.[p], keySignature)).join(' + ')
 }
 
 export function getSnapStep(baseDuration: BaseDuration, dotted: boolean): number {
@@ -609,6 +1016,8 @@ const EIGHTH_VISUAL_UNITS_PER_BEAT = 3
 const SIXTEENTH_VISUAL_UNITS_PER_BEAT = 5
 const THIRTY_SECOND_VISUAL_UNITS_PER_BEAT = 8
 const VISUAL_UNIT_WIDTH = SYSTEM_MEASURE_WIDTH / (4 * VISUAL_UNITS_PER_BEAT)
+const MAX_MEASURES_PER_SYSTEM = 4
+const MIN_SYSTEM_COMPRESSION_RATIO = 0.84
 
 function getSmallestBeatItemLength(
   items: ScoreItem[],
@@ -655,36 +1064,14 @@ function getBeatVisualUnitsForItems(
   return THIRTY_SECOND_VISUAL_UNITS_PER_BEAT
 }
 
-function getFocusedBeatVisualUnits(
-  focusedBaseDuration: BaseDuration | null,
-) {
-  if (focusedBaseDuration === '16') {
-    return SIXTEENTH_VISUAL_UNITS_PER_BEAT
-  }
-
-  if (focusedBaseDuration === '8') {
-    return EIGHTH_VISUAL_UNITS_PER_BEAT
-  }
-
-  return VISUAL_UNITS_PER_BEAT
-}
-
 function getStaffGroupVisualUnits(
   items: ScoreItem[],
   groupSubdivisionLengths: number[],
-  focusedGroupStart: number | null,
-  focusedBaseDuration: BaseDuration | null,
 ) {
   let groupStart = 0
 
   return groupSubdivisionLengths.map((groupLength) => {
-    const units = Math.max(
-      getBeatVisualUnitsForItems(items, groupStart, groupLength),
-      focusedGroupStart === groupStart && focusedBaseDuration !== null
-        ? getFocusedBeatVisualUnits(focusedBaseDuration)
-        : VISUAL_UNITS_PER_BEAT,
-    )
-
+    const units = getBeatVisualUnitsForItems(items, groupStart, groupLength)
     groupStart += groupLength
     return units
   })
@@ -694,12 +1081,7 @@ export function buildSystems(
   measures: MeasureData[],
   timeSignature: TimeSignature,
   groupingOverride: number[] | null,
-  placeholderFocus: {
-    groupStart: number
-    measureIndex: number
-    staffId: StaffId
-  } | null,
-  baseDuration: BaseDuration,
+  availableScoreWidth: number = SYSTEM_WRAP_WIDTH,
 ) {
   const meter = parseTimeSignature(timeSignature, groupingOverride)
   const systems: Array<
@@ -727,30 +1109,16 @@ export function buildSystems(
     width: number
   }> = []
   let currentWidth = 0
-  const maxWidth = SYSTEM_WRAP_WIDTH - SYSTEM_SIDE_PADDING * 2
+  const maxWidth = Math.max(320, availableScoreWidth - SYSTEM_SIDE_PADDING * 2)
 
   measures.forEach((measure, measureIndex) => {
-    const focusedTrebleGroupStart =
-      placeholderFocus?.measureIndex === measureIndex &&
-      placeholderFocus.staffId === 'treble'
-        ? placeholderFocus.groupStart
-        : null
-    const focusedBassGroupStart =
-      placeholderFocus?.measureIndex === measureIndex &&
-      placeholderFocus.staffId === 'bass'
-        ? placeholderFocus.groupStart
-        : null
     const trebleGroupUnits = getStaffGroupVisualUnits(
       measure.trebleItems,
       meter.groupSubdivisionLengths,
-      focusedTrebleGroupStart,
-      focusedTrebleGroupStart === null ? null : baseDuration,
     )
     const bassGroupUnits = getStaffGroupVisualUnits(
       measure.bassItems,
       meter.groupSubdivisionLengths,
-      focusedBassGroupStart,
-      focusedBassGroupStart === null ? null : baseDuration,
     )
     const trebleNoteAreaWidth = Math.ceil(
       trebleGroupUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
@@ -762,7 +1130,17 @@ export function buildSystems(
     const measureWidth =
       noteAreaWidth + (currentSystem.length === 0 ? MEASURE_DECORATION_WIDTH : 0)
 
-    if (currentSystem.length > 0 && currentWidth + measureWidth > maxWidth) {
+    const nextSystemWidth = currentWidth + measureWidth
+    const nextCompressionRatio =
+      currentSystem.length > 0 ? maxWidth / nextSystemWidth : 1
+
+    if (
+      currentSystem.length > 0 &&
+      (
+        currentSystem.length >= MAX_MEASURES_PER_SYSTEM ||
+        nextCompressionRatio < MIN_SYSTEM_COMPRESSION_RATIO
+      )
+    ) {
       systems.push(currentSystem)
       currentSystem = []
       currentWidth = 0

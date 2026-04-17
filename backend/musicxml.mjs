@@ -46,6 +46,18 @@ const KEY_BY_FIFTHS = {
   7: 'C#',
 }
 
+const LETTER_TO_SEMITONE = {
+  a: 9,
+  b: 11,
+  c: 0,
+  d: 2,
+  e: 4,
+  f: 5,
+  g: 7,
+}
+const SHARP_ORDER = ['f', 'c', 'g', 'd', 'a', 'e', 'b']
+const FLAT_ORDER = ['b', 'e', 'a', 'd', 'g', 'c', 'f']
+
 const MUSICXML_DIVISIONS = 8
 const MUSICXML_TYPE_BY_DURATION = {
   '8': 'eighth',
@@ -267,10 +279,6 @@ function findNextContiguousItem(measures, measureIndex, staffId, item, subdivisi
   return nextItem ? { item: nextItem, measureIndex: measureIndex + 1 } : null
 }
 
-function haveSamePitches(left, right) {
-  return left.length === right.length && left.every((pitch, index) => pitch === right[index])
-}
-
 function parsePitchToken(pitch) {
   const [noteToken = 'c', octave = '4'] = String(pitch).split('/')
   const token = noteToken.trim().toLowerCase()
@@ -289,6 +297,84 @@ function parsePitchToken(pitch) {
     octave,
     xmlAlter,
   }
+}
+
+function getAccidentalAlter(accidental) {
+  if (accidental === '##') return 2
+  if (accidental === '#') return 1
+  if (accidental === 'bb') return -2
+  if (accidental === 'b') return -1
+  if (accidental === 'n') return 0
+  return null
+}
+
+function getKeySignatureAlterForLetter(keySignature, letter) {
+  const fifths = KEY_SIGNATURE_TO_FIFTHS[keySignature] ?? 0
+
+  if (fifths > 0 && SHARP_ORDER.slice(0, fifths).includes(letter)) {
+    return 1
+  }
+
+  if (fifths < 0 && FLAT_ORDER.slice(0, Math.abs(fifths)).includes(letter)) {
+    return -1
+  }
+
+  return 0
+}
+
+function getEffectiveAlterForPitch(pitch, accidental, keySignature = 'C') {
+  const explicitAlter = getAccidentalAlter(accidental)
+  if (explicitAlter !== null) {
+    return explicitAlter
+  }
+
+  const parsed = parsePitchToken(pitch)
+  if (parsed.xmlAlter !== 0) {
+    return parsed.xmlAlter
+  }
+
+  return getKeySignatureAlterForLetter(keySignature, parsed.letter)
+}
+
+function getDisplayAccidentalForPitch(pitch, accidental, keySignature = 'C') {
+  if (accidental) {
+    return accidental
+  }
+
+  const parsed = parsePitchToken(pitch)
+  const keyAlter = getKeySignatureAlterForLetter(keySignature, parsed.letter)
+  const effectiveAlter = getEffectiveAlterForPitch(pitch, accidental, keySignature)
+
+  if (effectiveAlter === keyAlter) {
+    return null
+  }
+
+  if (effectiveAlter === 2) return '##'
+  if (effectiveAlter === 1) return '#'
+  if (effectiveAlter === 0) return 'n'
+  if (effectiveAlter === -1) return 'b'
+  if (effectiveAlter === -2) return 'bb'
+  return null
+}
+
+function getMidiForPitch(pitch, accidental, keySignature = 'C') {
+  const { letter, octave } = parsePitchToken(pitch)
+  return ((Number(octave) + 1) * 12) + LETTER_TO_SEMITONE[letter] + getEffectiveAlterForPitch(pitch, accidental, keySignature)
+}
+
+function haveSameNotePitches(left, right, keySignature = 'C') {
+  if (left.pitches.length !== right.pitches.length) {
+    return false
+  }
+
+  const leftMidi = left.pitches
+    .map((pitch) => getMidiForPitch(pitch, left.accidentals?.[pitch], keySignature))
+    .sort((a, b) => a - b)
+  const rightMidi = right.pitches
+    .map((pitch) => getMidiForPitch(pitch, right.accidentals?.[pitch], keySignature))
+    .sort((a, b) => a - b)
+
+  return leftMidi.every((value, index) => value === rightMidi[index])
 }
 
 function splitSubdivisions(subdivisions) {
@@ -340,7 +426,7 @@ function splitSubdivisionsByGroups(startSubdivision, totalSubdivisions, groupSub
   return chunks
 }
 
-function buildTieStopMap(measures, timeSignature) {
+function buildTieStopMap(measures, timeSignature, keySignature) {
   const stopTargets = new Set()
   const subdivisionsPerMeasure = parseEditorTimeSignature(timeSignature).subdivisionsPerMeasure
 
@@ -359,7 +445,7 @@ function buildTieStopMap(measures, timeSignature) {
           subdivisionsPerMeasure,
         )
 
-        if (next?.item.kind === 'note' && haveSamePitches(item.pitches, next.item.pitches)) {
+        if (next?.item.kind === 'note' && haveSameNotePitches(item, next.item, keySignature)) {
           stopTargets.add(next.item.id)
         }
       })
@@ -382,15 +468,18 @@ function buildSlurMaps(slurs) {
   return { startMap, stopMap }
 }
 
-function getAccidentalTag(note, pitch) {
-  const explicit = note.accidentals?.[pitch]
-  if (explicit === '#') return 'sharp'
-  if (explicit === 'b') return 'flat'
-  if (explicit === 'n') return 'natural'
+function getAccidentalTag(pitch, accidental, keySignature) {
+  const displayAccidental = getDisplayAccidentalForPitch(
+    pitch,
+    accidental ?? null,
+    keySignature,
+  )
 
-  const { xmlAlter } = parsePitchToken(pitch)
-  if (xmlAlter === 2) return 'double-sharp'
-  if (xmlAlter === -2) return 'flat-flat'
+  if (displayAccidental === '##') return 'double-sharp'
+  if (displayAccidental === '#') return 'sharp'
+  if (displayAccidental === 'bb') return 'flat-flat'
+  if (displayAccidental === 'b') return 'flat'
+  if (displayAccidental === 'n') return 'natural'
   return null
 }
 
@@ -431,7 +520,7 @@ function pushRestNote(lines, baseDuration, dots, staffNumber) {
   lines.push('      </note>')
 }
 
-function pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops) {
+function pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops, keySignature) {
   const tieStop = tieStops.has(item.id)
   const slurStartNumbers = slurStarts.get(item.id) ?? []
   const slurStopNumbers = slurStops.get(item.id) ?? []
@@ -439,8 +528,17 @@ function pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops)
   const ornamentTag = item.ornament ? ORNAMENT_TO_MUSICXML[item.ornament] : null
 
   item.pitches.forEach((pitch, index) => {
-    const { letter, octave, xmlAlter } = parsePitchToken(pitch)
-    const accidentalTag = getAccidentalTag(item, pitch)
+    const { letter, octave } = parsePitchToken(pitch)
+    const effectiveAlter = getEffectiveAlterForPitch(
+      pitch,
+      item.accidentals?.[pitch],
+      keySignature,
+    )
+    const accidentalTag = getAccidentalTag(
+      pitch,
+      item.accidentals?.[pitch],
+      keySignature,
+    )
 
     lines.push('      <note>')
     if (index > 0) {
@@ -448,8 +546,8 @@ function pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops)
     }
     lines.push('        <pitch>')
     lines.push(`          <step>${letter.toUpperCase()}</step>`)
-    if (xmlAlter !== 0) {
-      lines.push(`          <alter>${xmlAlter}</alter>`)
+    if (effectiveAlter !== 0) {
+      lines.push(`          <alter>${effectiveAlter}</alter>`)
     }
     lines.push(`          <octave>${octave}</octave>`)
     lines.push('        </pitch>')
@@ -520,7 +618,7 @@ function pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops)
   })
 }
 
-function pushStaffContents(lines, measure, staffId, measureSubdivisions, groupSubdivisionLengths, tieStops, slurStarts, slurStops) {
+function pushStaffContents(lines, measure, staffId, measureSubdivisions, groupSubdivisionLengths, tieStops, slurStarts, slurStops, keySignature) {
   const staffNumber = staffId === 'treble' ? 1 : 2
   const items = [...getItemsForStaff(measure, staffId)].sort((left, right) => left.start - right.start)
   let cursor = 0
@@ -542,7 +640,7 @@ function pushStaffContents(lines, measure, staffId, measureSubdivisions, groupSu
     }
 
     if (item.kind === 'note') {
-      pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops)
+      pushNoteItem(lines, item, staffNumber, tieStops, slurStarts, slurStops, keySignature)
     } else {
       pushRestNote(lines, item.baseDuration, item.dots, staffNumber)
     }
@@ -576,7 +674,7 @@ export function buildMusicXmlDocument(payload) {
   } = payload
 
   const { startMap: slurStarts, stopMap: slurStops } = buildSlurMaps(slurs)
-  const tieStops = buildTieStopMap(measures, timeSignature)
+  const tieStops = buildTieStopMap(measures, timeSignature, keySignature)
   const meter = parseEditorTimeSignature(timeSignature, timeSignatureGrouping)
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -649,6 +747,7 @@ export function buildMusicXmlDocument(payload) {
       tieStops,
       slurStarts,
       slurStops,
+      keySignature,
     )
 
     lines.push('      <backup>')
@@ -664,6 +763,7 @@ export function buildMusicXmlDocument(payload) {
       tieStops,
       slurStarts,
       slurStops,
+      keySignature,
     )
 
     lines.push('    </measure>')

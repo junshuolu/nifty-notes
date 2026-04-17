@@ -126,6 +126,12 @@ The pagination logic is system-based rather than measure-based.
 - The active backend entry is `backend/server.mjs`.
 - The active MusicXML implementation lives in `backend/musicxml.mjs`.
 
+## Latest Frontend Editing Fixes
+
+- Chord insertion hover now aligns with the actual selected note slot, which avoids the visual drift that previously appeared on the note to the right.
+- Score-front key-signature and time-signature click zones now track the rendered stave modifiers instead of using fixed horizontal guesses.
+- Score-front popovers now anchor from the clicked symbol, and system-start measure numbers are rendered at the left edge of each line for long scores.
+
 ## Build
 
 Frontend build:
@@ -147,3 +153,46 @@ npm run build:frontend
 - PDF pagination and cropping are still being tuned for edge cases like dense notation and very tight inter-system spacing.
 - PDF export depends on a local Chrome or Edge executable being available to the backend.
 - The backend serves the built frontend for PDF jobs, so stale `dist/` output can cause old PDF behavior if the frontend was changed but not rebuilt.
+
+## Latest Terminology and Key-Signature Updates
+
+- Note-value labels now use Australian terminology first, with the American name in parentheses for clarity, e.g. Crotchet (Quarter Note) and Dotted Minim (Dotted Half Note).
+- Key-signature summaries now include the rendered accidental pattern plus the named major/minor pair, e.g. a four-sharp pattern with E Major / C# Minor.
+- Key-signature chooser buttons now expose descriptive hover text such as Set E Major / C# Minor key signature (4#).
+- The score-front hotspot also reports the current key-signature name, not just the clickable area.
+- Manual key-signature changes do not currently transpose existing notes; they only update the displayed signature and related labels.
+
+## Latest Key-Aware Playback and Transposition
+
+- The active key signature now affects note spelling, playback pitch, preview pitch, tie validation, and exported MusicXML pitch data.
+- Notes that are implied by the key signature now sound correctly even when they do not carry an explicit accidental in the stored note data.
+- The key-signature popover now includes a `Transpose existing notes when changing key` toggle.
+- With the toggle off, changing key preserves the sounding notes and respells accidentals for the new signature.
+- With the toggle on, changing key transposes the existing composition into the selected target key and updates playback/export accordingly.
+
+## Latest Layout Simplification
+
+- The left-side Selection Help, Status, Selection, and Score cards are no longer part of the visible editing layout.
+- The composing surface is now centered on the page, with the score stage capped to a narrower reading width for large monitors.
+- Each system now targets a maximum of four bars per line.
+- Systems no longer expand to fill the entire viewport width; instead they stay compact, can compress slightly, and wrap sooner when space gets tight.
+- Within that capped score paper, each system now still aligns to the same right edge, so a three-bar line ends flush with a four-bar line.
+- The visible toolbar wording now uses `Bars`, `+ Bar`, and `- Bar`.
+- Wrapped systems now keep a stable line break while hovering for note insertion; hover focus no longer causes bars to jump between lines.
+
+## Latest Note-Insertion Flow
+
+- Note insertion no longer previews on plain hover. Moving the mouse across an empty rest slot does not expand placeholder rests or show the armed blue preview until the first click happens.
+- The note workflow is now explicitly two-step:
+  - first click: arm the chosen beat group
+  - second click: place the note
+- Once armed, the blue droplet and preview note are pinned to the left-most available slot in that beat group. This makes the fill order deterministic for students even if the first click landed later in the rest area.
+- After a note is inserted, the next left-most available slot in the same beat group stays armed automatically so repeated insertions can continue without re-hovering.
+
+## Latest Progressive Rest Breakdown
+
+- Semi-quaver (16th-note) entry now unfolds a quarter-beat rest as `16th + 16th + 8th`.
+- After the first two 16th-note insertions have been used, the remaining 8th rest is automatically refined into the final two 16th rests.
+- Demisemiquaver (32nd-note) entry now unfolds a quarter-beat rest as `32nd + 32nd + 16th + 8th`.
+- As the earlier 32nd-note slots are consumed, the remaining 16th rest and later the remaining 8th rest are progressively refined, so the notation stays readable instead of showing every 32nd rest up front.
+- This progressive planner currently applies to power-of-two beat groups, which covers the simple-meter teaching cases that motivated the change.

@@ -143,14 +143,14 @@ export const DURATION_OPTIONS: Array<{
   label: string
   previewClass: string
 }> = [
-  { baseDuration: 'w', dots: 0, label: 'Whole', previewClass: 'whole' },
-  { baseDuration: 'h', dots: 1, label: 'Dotted Half', previewClass: 'dotted-half' },
-  { baseDuration: 'h', dots: 0, label: 'Half', previewClass: 'half' },
-  { baseDuration: 'q', dots: 1, label: 'Dotted Quarter', previewClass: 'dotted-quarter' },
-  { baseDuration: 'q', dots: 0, label: 'Quarter', previewClass: 'quarter' },
-  { baseDuration: '8', dots: 0, label: 'Eighth', previewClass: 'eighth' },
-  { baseDuration: '16', dots: 0, label: 'Sixteenth', previewClass: 'sixteenth' },
-  { baseDuration: '32', dots: 0, label: 'Thirty-second', previewClass: 'thirty-second' },
+  { baseDuration: 'w', dots: 0, label: 'Semibreve (Whole Note)', previewClass: 'whole' },
+  { baseDuration: 'h', dots: 1, label: 'Dotted Minim (Dotted Half Note)', previewClass: 'dotted-half' },
+  { baseDuration: 'h', dots: 0, label: 'Minim (Half Note)', previewClass: 'half' },
+  { baseDuration: 'q', dots: 1, label: 'Dotted Crotchet (Dotted Quarter Note)', previewClass: 'dotted-quarter' },
+  { baseDuration: 'q', dots: 0, label: 'Crotchet (Quarter Note)', previewClass: 'quarter' },
+  { baseDuration: '8', dots: 0, label: 'Quaver (8th Note)', previewClass: 'eighth' },
+  { baseDuration: '16', dots: 0, label: 'Semi-quaver (16th Note)', previewClass: 'sixteenth' },
+  { baseDuration: '32', dots: 0, label: 'Demisemiquaver (32nd Note)', previewClass: 'thirty-second' },
 ]
 
 export const PLACEHOLDER_DURATIONS: RenderDuration[] = ['w', 'h', 'q', '8', '16', '32']
