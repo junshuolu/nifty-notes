@@ -9,6 +9,13 @@
 - Updated the composer instructions and README to reflect the current entry points: `NEW COMPOSITION`, saved composition reopen, MusicXML import, export, and PDF generation.
 - Added `PROJECT_OVERVIEW.md` to give future AI/dev handoffs a concise map of the composer architecture, state ownership, and safe change areas.
 
+### Score-End Controls and Chord Preview Alignment
+
+- Added `+ / -` controls beside the final double barline so users can add or remove the last bar directly from the score surface instead of returning to the toolbar.
+- Anchored the end-of-score controls to the rendered geometry of the actual final system, so they stay attached to the last barline as wrapping and score width change.
+- Fixed chord-hover preview targeting so the preview now locks to the selected note's real start slot instead of showing a misleading target to the right.
+- Fixed chord-hover preview positioning so the blue preview notehead now uses the rendered VexFlow note geometry of the selected chord anchor, which keeps the preview visually aligned with the existing notehead.
+
 ### Verification
 
 - `frontend/composer`: `npm run build`

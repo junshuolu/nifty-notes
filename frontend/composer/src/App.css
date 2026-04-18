@@ -446,6 +446,42 @@
   background: transparent;
 }
 
+.score-end-controls {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 90px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.score-end-control {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  background: rgba(248, 250, 252, 0.96);
+  color: #1d4ed8;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.12);
+  pointer-events: auto;
+}
+
+.score-end-control:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: #eff5ff;
+}
+
+.score-end-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  box-shadow: none;
+}
+
 .score-front-hotspot {
   position: absolute;
   border: 1px dashed transparent;
