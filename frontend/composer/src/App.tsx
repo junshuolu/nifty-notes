@@ -99,8 +99,6 @@ import {
   yToPitch,
 } from './composer/score'
 import { createFurEliseMeasures } from './composer/furElise'
-import { createRainMeasures, RAIN_META } from './composer/demos/rain'
-import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
 import {
   exportMusicXMLViaBackend,
   exportPDFViaBackend,
@@ -183,6 +181,11 @@ type LyricLayoutToken = {
   text: string
   y: number
 }
+type ScoreEndControlsLayout = {
+  bottom: number
+  centerX: number
+  top: number
+}
 
 
 const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
@@ -190,9 +193,8 @@ const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'articulations', label: 'Articulations', hint: 'Apply touch and accent marks to the selected note.' },
   { id: 'ornaments', label: 'Ornaments', hint: 'Add trill and ornament symbols above the selected note.' },
   { id: 'dynamics', label: 'Dynamics', hint: 'Attach expressive dynamic markings to the selected note.' },
-  { id: 'bars', label: 'Bars', hint: 'Manage bars, meter, playback demo, and reset tools.' },
+  { id: 'bars', label: 'Bars', hint: 'Manage bars, meter, tempo, and reset tools.' },
   { id: 'text', label: 'Text', hint: 'Edit score title fields and lyrics for the selected note.' },
-  { id: 'gallery', label: '🎹 Gallery', hint: 'Load a piano masterpiece and start editing it.' },
   { id: 'export', label: 'Export', hint: 'Save the score as a PDF file.' },
 ]
 
@@ -360,7 +362,6 @@ const TAB_SELECTION_HINT: Record<Exclude<ToolbarTab, 'notes'>, string> = {
   bars: 'Click a measure in the score to target it, then set a tempo mark from the Measures toolbar.',
   dynamics: 'Click an existing note to choose where the dynamic marking should appear.',
   export: 'Use the button below to export the score as PDF — no note selection needed.',
-  gallery: 'Click a demo card to load that piece as your score.',
   ornaments: 'Click an existing note to add or remove an ornament.',
   text: 'Click an existing note to attach lyrics, or edit the score title block below.',
 }
@@ -389,11 +390,6 @@ const TAB_SIDEBAR_TIPS: Record<ToolbarTab, string[]> = {
     'Click any measure in the score to target that measure for tempo changes.',
     'Click the time signature or key signature at the front of a system to open its chooser directly on the score.',
     'Set a measure tempo to draw a metronome mark above that measure and change playback from there onward.',
-  ],
-  gallery: [
-    'Click any demo card to load that piano piece as your working score.',
-    'After loading, switch to the Notes tab to edit the score and add your own notes.',
-    'All 9 pieces are recognizable simplifications — you can extend them further.',
   ],
   text: [
     'Select a note to edit its lyric text, then apply or clear the lyric from the toolbar.',
@@ -634,10 +630,6 @@ const BAR_ACTION_HELP = {
     description: 'Clear removes all notes and rests from the score while leaving an editable blank page.',
     title: 'Clear Score',
   },
-  demo: {
-    description: 'Demo reloads the Fur Elise sample so you can inspect notation behavior and playback quickly.',
-    title: 'Demo Score',
-  },
   remove: {
     description: 'Remove Measure deletes the last measure, but always leaves at least one measure on the page.',
     title: 'Remove Measure',
@@ -667,6 +659,7 @@ type HoveredRestPosition = {
 }
 
 type PendingInsertPreview = {
+  anchorItemId?: string
   measureIndex: number
   pitch: NotePitch
   staffId: StaffId
@@ -1683,6 +1676,23 @@ function getScoreFrontPopoverWidth(kind: ScoreFrontPopover['kind']) {
     : SCORE_FRONT_KEY_POPOVER_WIDTH
 }
 
+function haveSameScoreEndControlsLayout(
+  left: ScoreEndControlsLayout | null,
+  right: ScoreEndControlsLayout | null,
+) {
+  if (left === right) {
+    return true
+  }
+
+  if (!left || !right) {
+    return false
+  }
+
+  return left.bottom === right.bottom &&
+    left.centerX === right.centerX &&
+    left.top === right.top
+}
+
 function drawSystemMeasureNumber(
   context: VexRenderContext,
   systemLeftX: number,
@@ -2142,11 +2152,13 @@ function PendingInsertIndicator({
   baseDuration,
   dotted,
   hitBoxes,
+  noteRegistry,
   position,
 }: {
   baseDuration: BaseDuration
   dotted: boolean
   hitBoxes: MeasureHitBox[]
+  noteRegistry: Map<string, { item: NoteItem; note: StaveNote }>
   position: PendingInsertPreview
 }) {
   const hitBox = hitBoxes.find(
@@ -2154,14 +2166,19 @@ function PendingInsertIndicator({
       box.index === position.measureIndex &&
       box.staffId === position.staffId,
   )
-  const previewX = hitBox
-    ? getPreviewXForSubdivisionRange(
-      hitBox,
-      position.subdivision,
-      baseDuration,
-      dotted,
-    )
-    : 0
+  const previewAnchorNote = position.anchorItemId
+    ? noteRegistry.get(position.anchorItemId)
+    : undefined
+  const previewX =
+    previewAnchorNote?.note.getCenterGlyphX() ??
+    (hitBox
+      ? getPreviewXForSubdivisionRange(
+        hitBox,
+        position.subdivision,
+        baseDuration,
+        dotted,
+      )
+      : 0)
   const previewY = hitBox
     ? pitchToY(
       position.pitch,
@@ -2227,6 +2244,7 @@ function App() {
   const tempoPanelRef = useRef<HTMLDivElement | null>(null)
   const fileMenuRef = useRef<HTMLDivElement | null>(null)
   const hitBoxesRef = useRef<MeasureHitBox[]>([])
+  const noteRegistryRef = useRef<Map<string, { item: NoteItem; note: StaveNote }>>(new Map())
   const pianoRef = useRef<Tone.Sampler | null>(null)
   const pianoLoaderRef = useRef<Promise<Tone.Sampler> | null>(null)
   const previewSynthRef = useRef<Tone.Synth | null>(null)
@@ -2287,6 +2305,7 @@ function App() {
   const [isExporting, setIsExporting] = useState(false)
   const [isImportingMusicXml, setIsImportingMusicXml] = useState(false)
   const [isPdfRenderJobReady, setIsPdfRenderJobReady] = useState(!isPdfRenderMode)
+  const [scoreEndControlsLayout, setScoreEndControlsLayout] = useState<ScoreEndControlsLayout | null>(null)
   const [exportDialog, setExportDialog] = useState<{ filename: string } | null>(null)
   const [saveDialog, setSaveDialog] = useState<{ name: string } | null>(null)
   const [savedCompositionSnapshot, setSavedCompositionSnapshot] = useState<SavedCompositionSnapshot | null>(
@@ -2561,6 +2580,7 @@ function App() {
     const hitBoxes: MeasureHitBox[] = []
     const lyricTokens: LyricLayoutToken[] = []
     const renderedPdfSystemBounds: PdfSystemBound[] = []
+    let renderedScoreEndControlsLayout: ScoreEndControlsLayout | null = null
 
     const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2
 
@@ -2834,6 +2854,14 @@ function App() {
         systemTop = Math.min(systemTop, trebleHitBounds.hitTop, bassHitBounds.hitTop)
         systemBottom = Math.max(systemBottom, trebleHitBounds.hitBottom, bassHitBounds.hitBottom)
 
+        if (isFinalMeasure) {
+          renderedScoreEndControlsLayout = {
+            bottom: Math.max(trebleHitBounds.hitBottom, bassHitBounds.hitBottom),
+            centerX: Math.min(scoreWidth - 18, currentX + adjustedWidth + SYSTEM_SIDE_PADDING / 2),
+            top: Math.min(trebleHitBounds.hitTop, bassHitBounds.hitTop),
+          }
+        }
+
         hitBoxes.push({
           hitBottom: trebleHitBounds.hitBottom,
           hitTop: trebleHitBounds.hitTop,
@@ -2937,7 +2965,13 @@ function App() {
     }
 
     hitBoxesRef.current = hitBoxes
+    noteRegistryRef.current = noteRegistry
     pdfSystemBoundsRef.current = renderedPdfSystemBounds
+    setScoreEndControlsLayout((current) =>
+      haveSameScoreEndControlsLayout(current, renderedScoreEndControlsLayout)
+        ? current
+        : renderedScoreEndControlsLayout,
+    )
   }, [
     activeItemId,
     eraseHoverItemId,
@@ -3637,21 +3671,27 @@ function App() {
         setHoveredRestPosition(null)
 
         let isHoveringActiveChordTarget = false
-        if (pointerTarget.targetItem?.kind === 'note' && pointerTarget.targetItem.id === activeItemId) {
+        const hoveredChordTarget =
+          pointerTarget.targetItem?.kind === 'note' && pointerTarget.targetItem.id === activeItemId
+            ? pointerTarget.targetItem
+            : null
+        if (hoveredChordTarget) {
           const canEditSelectedChord =
-            pointerTarget.targetItem.baseDuration === baseDuration &&
-            pointerTarget.targetItem.dots === (dotted ? 1 : 0) &&
-            (!pointerTarget.targetItem.pitches.includes(pointerTarget.pitch) || event.shiftKey)
+            hoveredChordTarget.baseDuration === baseDuration &&
+            hoveredChordTarget.dots === (dotted ? 1 : 0) &&
+            (!hoveredChordTarget.pitches.includes(pointerTarget.pitch) || event.shiftKey)
 
           isHoveringActiveChordTarget = canEditSelectedChord
         }
 
         if (isHoveringActiveChordTarget) {
           setChordHoverPreview({
+            anchorItemId: hoveredChordTarget!.id,
             measureIndex: pointerTarget.hitBox.index,
             pitch: pointerTarget.pitch,
             staffId: pointerTarget.hitBox.staffId,
-            subdivision: pointerTarget.snappedSubdivision,
+            // Chord edits always apply to the selected note's actual start slot.
+            subdivision: hoveredChordTarget!.start,
           })
         } else {
           setChordHoverPreview(null)
@@ -4338,37 +4378,6 @@ function App() {
     setStatus(`Loaded saved composition "${snapshot.title}".`)
   }
 
-  function loadFurElise() {
-    pianoRef.current?.releaseAll()
-    clearScheduledPlayback()
-    stopPlaybackVisuals()
-    setIsPlaying(false)
-    setTimeSignature('3/4')
-    setTimeSignatureGrouping(null)
-    setKeySignature('C')
-    setGrandStaffLayoutMode('independent')
-    setMeasures(createFurEliseMeasures())
-    setSlurs([])
-    setTempoBpm(72)
-    clearPendingInsertPreview()
-    setPendingSlurSelection(null)
-    setScoreFrontPopover(null)
-    setActiveMeasureIndex(0)
-    setBaseDuration('8')
-    setActiveTab('notes')
-    setHelpCard(getToolbarTabHelp('notes'))
-    setMode('note')
-    setActiveItemId(null)
-    setScoreTitle('F\u00fcr Elise')
-    setScoreSubtitle('')
-    setScoreComposer('Ludwig van Beethoven')
-    setScoreLyricist('')
-    setScoreArranger('')
-    clearHoverState()
-    setHelpCard(BAR_ACTION_HELP.demo)
-    setStatus('Loaded demo: Fur Elise (A theme). Press Play to listen!')
-  }
-
   function clearScore() {
     pianoRef.current?.releaseAll()
     clearScheduledPlayback()
@@ -4387,48 +4396,6 @@ function App() {
     setHelpCard(BAR_ACTION_HELP.clear)
     clearHoverState()
     setStatus('Score cleared. The blue teardrop now marks the next insert position.')
-  }
-
-  function loadDemo(
-    createMeasuresFn: () => MeasureData[],
-    meta: {
-      arranger: string
-      composer: string
-      keySignature: KeySignatureSpec
-      lyricist: string
-      subtitle: string
-      tempoBpm: number
-      timeSignature: TimeSignature
-      title: string
-    },
-  ) {
-    pianoRef.current?.releaseAll()
-    clearScheduledPlayback()
-    stopPlaybackVisuals()
-    setIsPlaying(false)
-    setTimeSignature(meta.timeSignature)
-    setTimeSignatureGrouping(null)
-    setKeySignature(meta.keySignature)
-    setGrandStaffLayoutMode('independent')
-    setMeasures(createMeasuresFn())
-    setSlurs([])
-    setTempoBpm(meta.tempoBpm)
-    clearPendingInsertPreview()
-    setPendingSlurSelection(null)
-    setScoreFrontPopover(null)
-    setActiveMeasureIndex(0)
-    setBaseDuration('8')
-    setActiveTab('notes')
-    setHelpCard(getToolbarTabHelp('notes'))
-    setMode('note')
-    setActiveItemId(null)
-    setScoreTitle(meta.title)
-    setScoreSubtitle(meta.subtitle)
-    setScoreComposer(meta.composer)
-    setScoreLyricist(meta.lyricist)
-    setScoreArranger(meta.arranger)
-    clearHoverState()
-    setStatus(`Loaded: ${meta.title}${meta.composer ? ` \u2014 ${meta.composer}` : ''}. Press Play to listen!`)
   }
 
   function applyLyrics(text: string) {
@@ -5093,7 +5060,7 @@ function App() {
                 <h3>Starting a piece</h3>
                 <ul>
                   <li>Use `NEW COMPOSITION` for a blank 4/4 score with a default tempo of 80 BPM.</li>
-                  <li>The current demo and gallery pieces remain editable after they load.</li>
+                  <li>Use `FILE` to reopen a saved composition or import a MusicXML file into the current editor.</li>
                   <li>Imported MusicXML files are shown with linked treble and bass beat alignment.</li>
                 </ul>
               </section>
@@ -5479,14 +5446,11 @@ function App() {
                     </button>
                   </div>
 
-                  <div className="tool-group compact">
-                    <span className="group-label">Score</span>
-                    <button className="tool" onClick={loadFurElise} title="Load Fur Elise Demo" type="button">
-                      🎹 Demo
-                    </button>
-                    <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
-                      Clear
-                    </button>
+                <div className="tool-group compact">
+                  <span className="group-label">Score</span>
+                  <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
+                    Clear
+                  </button>
                   </div>
                 </>
               ) : null}
@@ -5617,30 +5581,6 @@ function App() {
                   </button>
                   <div className="toolbar-note">
                     Edit the large title block directly above the staff. Changes update live.
-                  </div>
-                </div>
-              ) : null}
-
-              {activeTab === 'gallery' ? (
-                <div className="tool-group tool-group--gallery">
-                  <span className="group-label">Piano Masterpieces</span>
-                  <div className="gallery-grid">
-                    {[
-                      { factory: createFurEliseMeasuresNew, meta: FUR_ELISE_META },
-                      { factory: createRainMeasures, meta: RAIN_META },
-                    ].map((demo) => (
-                      <button
-                        key={demo.meta.title}
-                        className="gallery-card"
-                        onClick={() => loadDemo(demo.factory, demo.meta)}
-                        type="button"
-                      >
-                        <span className="gallery-card__title">{demo.meta.title}</span>
-                        {demo.meta.subtitle && <span className="gallery-card__sub">{demo.meta.subtitle}</span>}
-                        <span className="gallery-card__composer">{demo.meta.composer}</span>
-                        <span className="gallery-card__meta">{demo.meta.timeSignature} · {demo.meta.tempoBpm} BPM · Key: {demo.meta.keySignature}</span>
-                      </button>
-                    ))}
                   </div>
                 </div>
               ) : null}
@@ -5884,6 +5824,7 @@ function App() {
                     baseDuration={baseDuration}
                     dotted={dotted}
                     hitBoxes={hitBoxesRef.current}
+                    noteRegistry={noteRegistryRef.current}
                     position={(pendingInsertPreview || chordHoverPreview)!}
                   />
                 ) : null}
@@ -5908,6 +5849,36 @@ function App() {
                   role="presentation"
                   style={{ height: `${scoreHeight}px`, width: `${scoreWidth}px` }}
                 />
+                {!isPdfRenderMode && scoreEndControlsLayout ? (
+                  <div
+                    className="score-end-controls"
+                    style={{
+                      height: `${scoreEndControlsLayout.bottom - scoreEndControlsLayout.top}px`,
+                      left: `${scoreEndControlsLayout.centerX}px`,
+                      top: `${scoreEndControlsLayout.top}px`,
+                    }}
+                  >
+                    <button
+                      aria-label="Add one bar after the final bar"
+                      className="score-end-control"
+                      onClick={addMeasure}
+                      title="Add one bar"
+                      type="button"
+                    >
+                      +
+                    </button>
+                    <button
+                      aria-label="Remove the final bar"
+                      className="score-end-control"
+                      disabled={measures.length === 1}
+                      onClick={removeMeasure}
+                      title={measures.length === 1 ? 'At least one bar must remain' : 'Remove one bar'}
+                      type="button"
+                    >
+                      -
+                    </button>
+                  </div>
+                ) : null}
                 {scoreFrontHotspots.map((hotspot) => (
                   <button
                     key={`${hotspot.kind}-${hotspot.measureIndex}`}
