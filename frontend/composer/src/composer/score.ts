@@ -1082,6 +1082,7 @@ export function buildSystems(
   timeSignature: TimeSignature,
   groupingOverride: number[] | null,
   availableScoreWidth: number = SYSTEM_WRAP_WIDTH,
+  alignGrandStaffByBeat = false,
 ) {
   const meter = parseTimeSignature(timeSignature, groupingOverride)
   const systems: Array<
@@ -1112,14 +1113,24 @@ export function buildSystems(
   const maxWidth = Math.max(320, availableScoreWidth - SYSTEM_SIDE_PADDING * 2)
 
   measures.forEach((measure, measureIndex) => {
-    const trebleGroupUnits = getStaffGroupVisualUnits(
+    const rawTrebleGroupUnits = getStaffGroupVisualUnits(
       measure.trebleItems,
       meter.groupSubdivisionLengths,
     )
-    const bassGroupUnits = getStaffGroupVisualUnits(
+    const rawBassGroupUnits = getStaffGroupVisualUnits(
       measure.bassItems,
       meter.groupSubdivisionLengths,
     )
+    const alignedGroupUnits = alignGrandStaffByBeat
+      ? meter.groupSubdivisionLengths.map((_, groupIndex) =>
+          Math.max(
+            rawTrebleGroupUnits[groupIndex] ?? VISUAL_UNITS_PER_BEAT,
+            rawBassGroupUnits[groupIndex] ?? VISUAL_UNITS_PER_BEAT,
+          ),
+        )
+      : null
+    const trebleGroupUnits = alignedGroupUnits ?? rawTrebleGroupUnits
+    const bassGroupUnits = alignedGroupUnits ?? rawBassGroupUnits
     const trebleNoteAreaWidth = Math.ceil(
       trebleGroupUnits.reduce((sum, units) => sum + units, 0) * VISUAL_UNIT_WIDTH,
     )

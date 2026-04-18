@@ -1,4 +1,70 @@
-﻿# Changelog
+# Changelog
+
+## 2026-04-17
+
+### MusicXML Import Alignment and Lyrics
+
+- Added a linked grand-staff render mode for imported MusicXML that now shares both beat-width decisions and the final rendered X grid across treble and bass.
+- Tightened imported grand-staff spacing by deriving a shared note area from the rendered stave bounds, so notes that start together now land on the same horizontal beat anchor.
+- Changed long-note placement from full-span centering to leading beat-segment anchoring, so imported half notes in `4/4` now land on beats 1 and 3 rather than drifting toward the middle of their spans.
+- Applied the same onset anchor rule to pending-note previews and lyric anchoring so import layout, preview placement, and final noteheads all agree.
+- Replaced lyric `Annotation` rendering with a dedicated SVG lyric layer between the staves.
+- Lyrics now stay on one baseline per system, remain constrained to their local measure segment, and long lyric strings compress to fit instead of colliding into the next lyric.
+- Propagated the linked-grid bounds into imported measure hitboxes so hover, insertion preview, and playback tracking stay consistent with the imported layout.
+
+### Composition File Workflow and Help
+
+- Added a persistent top-bar `NEW COMPOSITION` action so users can reset into a fresh score from either a built-in demo or an imported composition.
+- Added a `FILE` menu with local save/open, MusicXML import, MusicXML export, and PDF export actions.
+- Added an `INSTRUCTIONS` dialog that explains the editing workflow plus how to create, import, save, and export a composition.
+
+### Verification
+
+- `frontend/composer`: `npm run build`
+- Local browser import smoke tests verified:
+  - shared first-beat notehead X positions across treble and bass in linked import mode
+  - half-note onset anchors in `4/4` now match quarter-note beats 1 and 3
+  - one lyric baseline per system after MusicXML import
+  - long lyric text staying within its segment instead of overlapping the following lyric
+
+## 2026-04-18
+
+### Rest-as-Placeholder Note Insertion and Grand Staff Alignment
+
+- Default empty beats now display quarter rests for a clean, uncluttered look.
+- Progressive left-to-right rest expansion activates only after the user arms a beat group (first click). Once armed, rests expand based on the selected note duration:
+  - 16th-note: `16th + 16th + 8th`, then the trailing 8th splits into two 16ths as earlier slots are filled.
+  - 32nd-note: `32nd + 32nd + 16th + 8th`, with progressive refinement as earlier slots are consumed.
+- Treble and bass staves now always share the same beat-level visual-unit widths, ensuring that rests and notes with the same starting beat position align vertically regardless of whether the composition was imported or manually created.
+- Both staves now always use linked grid bounds for subdivision positioning, so the horizontal X coordinates for treble and bass share the same coordinate space.
+- The alignment rule remains: quarter rests/notes align with 8th positions 1, 3, 5, 7; 8th rests/notes align with 16th positions 1, 3, 5, 7, 9, 11, 13, 15; quarter rests/notes align with 16th positions 1, 5, 9, 13.
+
+### Verification
+
+- `frontend/composer`: `npm run build`
+
+### Start-Slot Alignment Model
+
+- Finalized the alignment rule so noteheads and rests now anchor strictly to `start` position on the smallest subdivision grid, not to the geometric center of their covered span.
+- This means longer values now align with the first shorter onset they cover:
+  - half notes align to quarter-note starts `1, 3` in `4/4`
+  - quarter notes align to eighth-note starts `1, 3, 5, 7`
+  - quarter notes align to sixteenth-note starts `1, 5, 9, 13`
+- Reused the same start-slot anchor rule for pending insertion previews and imported lyric anchors so preview, import, and final render all share one timing model.
+- Replaced the previous fixed note/rest placement offsets with dynamic VexFlow metrics when positioning rendered tickables, so rests, dotted values, and modifier-bearing notes clamp against their real glyph widths instead of hard-coded extents.
+
+### Verification
+
+- `frontend/composer`: `npm run build`
+- Local browser import geometry checks confirmed:
+  - measure 1 quarter-note X positions: `143.245, 193.245, 243.245, 293.245`
+  - measure 1 half-note X positions: `143.245, 243.245`
+  - measure 2 eighth-note X positions: `496.833, 535.583, 574.333, 613.083, 651.833, 690.583, 729.333, 768.083`
+  - measure 2 quarter-note X positions: `496.833, 574.333, 651.833, 729.333`
+  - measure 1 half-rest X positions: `130.285, 230.285`, aligned to quarter-note starts `1, 3`
+  - measure 2 quarter-rest X positions: `500.833, 578.333, 655.833, 733.333`, aligned to eighth-note starts `1, 3, 5, 7`
+  - imported lyric baseline remained unified and long lyric overlap stayed `false`
+
 
 ## 2026-04-15
 

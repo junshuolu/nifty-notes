@@ -1,4 +1,4 @@
-﻿# Project Review
+# Project Review
 
 ## 褰撳墠椤圭洰鐘舵€?
 
@@ -459,3 +459,95 @@ https://www.niftynotes.com.au/
     - first click arms the left-most slot in the chosen rest group
     - after inserting a 16th note, the next slot in the same group remains armed
     - after inserting a 32nd note, the next slot in the same group remains armed
+
+## 2026-04-17 AI Handoff Summary
+
+This section is appended in plain ASCII because the older content above shows encoding corruption in terminal output. Do not delete the older notes blindly; use this section as the current handoff baseline.
+
+### Current Product Shape
+
+- The project is a piano grand-staff composer built with React + Vite + TypeScript on the frontend and a small Node backend for MusicXML / PDF workflows.
+- Frontend entry point: `frontend/composer/src/App.tsx`
+- Core score math and system breaking: `frontend/composer/src/composer/score.ts`
+- MusicXML and PDF client helpers: `frontend/composer/src/composer/io.ts`
+- Backend HTTP server: `backend/server.mjs`
+- Backend MusicXML parser / generator: `backend/musicxml.mjs`
+
+### Data Model and Rendering
+
+- The main score state is still `MeasureData[]`.
+- Each measure stores separate `trebleItems` and `bassItems`.
+- A `NoteItem` can carry `accidentals`, `articulation`, `ornament`, `dynamic`, `lyrics`, and `tieToNext`.
+- VexFlow still draws the notation itself, but some layout details are now handled manually in `App.tsx` after tickables are positioned.
+
+### Important Recent Changes
+
+- There is now a persistent top-bar `NEW COMPOSITION` button.
+- There is now a `FILE` menu with:
+  - local save
+  - open saved composition
+  - MusicXML import
+  - MusicXML export
+  - PDF export
+- There is now an `INSTRUCTIONS` dialog for user guidance.
+- Imported compositions set `layoutMode: 'linked'`.
+- Demo / manually created compositions remain on `layoutMode: 'independent'` unless loaded from a saved linked snapshot.
+- `buildSystems(..., alignGrandStaffByBeat)` in `score.ts` already aligns per-beat visual units for linked imports.
+- `App.tsx` now also aligns the final rendered note grid by using shared grand-staff bounds:
+  - shared start X = `max(treble.noteStartX, bass.noteStartX)`
+  - shared end X = `min(treble.noteEndX, bass.noteEndX)`
+  - both staves then place their subdivision anchors onto that same rendered grid
+- Long-duration noteheads are no longer centered across their full spans.
+- They now anchor to the leading beat segment of the note onset, which fixes imported half-note / whole-note visual drift against shorter notes on the other staff.
+- The same onset-anchor rule is reused by the pending insert preview and lyric anchor placement, so the preview position matches the final rendered notehead.
+- Lyrics no longer render as VexFlow `Annotation`.
+- Lyrics are now drawn as a dedicated SVG text layer on a single baseline between the treble and bass staves.
+- Long lyric strings are constrained to their measure segment and compressed to fit so they do not overlap the next lyric.
+
+### Files to Read First Next Time
+
+- `frontend/composer/src/App.tsx`
+  - top-bar actions
+  - file menu / save dialog / instructions dialog
+  - import handler `applyImportedMusicXml(...)`
+  - score render effect
+  - lyric SVG layout helpers
+- `frontend/composer/src/composer/score.ts`
+  - `buildSystems(...)`
+  - beat-group visual width logic
+  - playback and subdivision helpers
+- `backend/musicxml.mjs`
+  - import parsing for lyrics, ties, slurs, and note durations
+
+### Known Limitations
+
+- Save is browser-local `localStorage`, not cloud save, not multi-slot project management.
+- The lyric collision fix is intentionally conservative: very long single-token lyrics are compressed to avoid overlap, but there is no hyphenation or manual line-break workflow yet.
+- The older `project_review.md` content above this section may still contain useful historical context, but the encoding corruption makes it unreliable for direct copy/edit operations.
+
+## 2026-04-18 Alignment Follow-up
+
+- The final import/render rule is stricter than the earlier 2026-04-17 note:
+  - do not center long notes across their spans
+  - do not align by array index
+  - do align by `start` on the smallest timing grid
+- In practice, if two objects share the same `start` subdivision, they should share the same horizontal anchor even when their durations differ.
+- This applies to rests as well as notes.
+- Render placement no longer depends on fixed note/rest offsets; `App.tsx` now reads VexFlow note metrics at layout time and clamps each tickable using its real left/right footprint.
+- This same rule should be treated as the source of truth for:
+  - imported MusicXML note placement
+  - manual note insertion preview placement
+  - rest decomposition / placeholder inheritance
+  - lyric anchor placement
+- The frontend already stores `start` and derives durations in subdivision units, so future alignment work should continue from that model rather than adding duration-specific special cases.
+
+## 2026-04-18 Rest-as-Placeholder Note Insertion and Grand Staff Alignment
+
+- Core principle change: rests are now the placement baseline for all note insertion. Notes replace visible rest positions; they no longer compute horizontal positions independently.
+- Default empty beats display quarter rests for a clean, uncluttered look. Progressive rest expansion only activates after the user arms a beat group (first click).
+- Once armed, the focused beat group expands rests based on the selected note duration: 16th → `16th + 16th + 8th`; 32nd → `32nd + 32nd + 16th + 8th`. As earlier slots are filled, trailing rests progressively refine.
+- Grand staff beat-level alignment is now always enabled. Previously, `alignGrandStaffByBeat` was only `true` for imported (linked) compositions. Now treble and bass staves always share the same beat-level visual-unit widths.
+- Both staves always use linked grid bounds for subdivision X positioning, ensuring treble and bass share the same coordinate space. This guarantees that rests and notes with the same starting beat position appear at the same vertical column.
+- The strict alignment rule: quarter rest/note aligns with 8th positions 1, 3, 5, 7; 8th rest/note aligns with 16th positions 1, 3, 5, 7, 9, 11, 13, 15; quarter rest/note aligns with 16th positions 1, 5, 9, 13.
+- Files changed: `App.tsx` (buildStaffVoiceData, useMemo for buildSystems, render effect), `score.ts` (no changes needed, existing `buildSystems` already had the `alignGrandStaffByBeat` parameter).
+- Verification: `npm run build` passes.

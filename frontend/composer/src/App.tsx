@@ -120,8 +120,6 @@ declare global {
 }
 
 const PLAYBACK_START_DELAY_SECONDS = 0.08
-const NOTE_VISUAL_SHIFT = 4
-const REST_VISUAL_SHIFT = 11
 const MEASURE_EDGE_PADDING = 3
 const GRID_EDGE_PADDING = 10
 const DEFAULT_GROUP_VISUAL_UNITS = 2
@@ -139,16 +137,51 @@ const SCORE_FRONT_KEY_POPOVER_WIDTH = 540
 const SCORE_FRONT_HOTSPOT_HEIGHT = GRAND_STAFF_GAP + 62
 const SCORE_MIN_SURFACE_WIDTH = 640
 const PDF_JOB_SEARCH_PARAM = 'pdfJob'
+const LOCAL_COMPOSITION_STORAGE_KEY = 'nifty-notes.saved-composition.v1'
+const DEFAULT_NEW_COMPOSITION_MEASURES = 4
+const DEFAULT_NEW_COMPOSITION_TEMPO = 80
+const DEFAULT_NEW_COMPOSITION_TIME_SIGNATURE = '4/4'
 const SHARP_SYMBOL = '\u266F'
 const FLAT_SYMBOL = '\u266D'
 const NATURAL_SYMBOL = '\u266E'
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const LYRIC_FONT_FAMILY = 'Academico, "Times New Roman", serif'
+const LYRIC_FONT_SIZE = 15
+const LYRIC_MIN_FONT_SIZE = 11
+const LYRIC_SEGMENT_PADDING = 6
+const LYRIC_BASELINE_BIAS = 0.42
+const LYRIC_MIN_SEGMENT_WIDTH = 24
 
 type VexRenderContext = ReturnType<Renderer['getContext']>
+type CompositionLayoutMode = 'independent' | 'linked'
+type CompositionIoPayload = MusicXmlScorePayload & {
+  layoutMode?: CompositionLayoutMode
+}
 type KeySignatureMeta = {
   countLabel: string
   countPhrase: string
   keyNames: string
   summaryGlyph: string
+}
+type SavedCompositionSnapshot = {
+  layoutMode: CompositionLayoutMode
+  payload: CompositionIoPayload
+  savedAt: string
+  title: string
+  version: 1
+}
+type GridBounds = {
+  endX: number
+  startX: number
+}
+type LyricLayoutToken = {
+  anchorX: number
+  measureIndex: number
+  measureLeft: number
+  measureRight: number
+  systemIndex: number
+  text: string
+  y: number
 }
 
 
@@ -675,6 +708,58 @@ type HelpCard = {
   title: string
 }
 
+function buildBlankMeasures(count = DEFAULT_NEW_COMPOSITION_MEASURES): MeasureData[] {
+  return Array.from({ length: Math.max(count, 1) }, (_, index) =>
+    createMeasure(`measure-${index + 1}`),
+  )
+}
+
+function readSavedCompositionSnapshot(): SavedCompositionSnapshot | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_COMPOSITION_STORAGE_KEY)
+    if (!raw) {
+      return null
+    }
+
+    const parsed = JSON.parse(raw) as Partial<SavedCompositionSnapshot>
+    if (
+      parsed?.version !== 1 ||
+      !parsed.payload ||
+      typeof parsed.savedAt !== 'string'
+    ) {
+      return null
+    }
+
+    return {
+      layoutMode: parsed.layoutMode === 'linked' ? 'linked' : 'independent',
+      payload: parsed.payload as CompositionIoPayload,
+      savedAt: parsed.savedAt,
+      title:
+        typeof parsed.title === 'string' && parsed.title.trim()
+          ? parsed.title
+          : (parsed.payload.scoreTitle?.trim() || 'Untitled Composition'),
+      version: 1,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeSavedCompositionSnapshot(snapshot: SavedCompositionSnapshot) {
+  if (typeof window === 'undefined') {
+    throw new Error('Local saving is unavailable in this environment.')
+  }
+
+  window.localStorage.setItem(
+    LOCAL_COMPOSITION_STORAGE_KEY,
+    JSON.stringify(snapshot),
+  )
+}
+
 function getToolbarTabHelp(tab: ToolbarTab): HelpCard {
   const meta = TOOLBAR_TABS.find((item) => item.id === tab) ?? TOOLBAR_TABS[0]
   return {
@@ -1007,11 +1092,6 @@ function createVisualNote(
         dynAnn.setFont('Bravura, Academico, "Times New Roman", serif', 26, 'normal', 'normal')
         dynAnn.setYShift(-24)
         note.addModifier(dynAnn)
-      }
-      if (item.lyrics) {
-        const lyricAnn = new Annotation(item.lyrics)
-        lyricAnn.setVerticalJustification(Annotation.VerticalJustify.BOTTOM)
-        note.addModifier(lyricAnn)
       }
     } catch (e) {
       console.warn('VexFlow modifier error:', e)
@@ -1370,6 +1450,8 @@ function buildStaffVoiceData(
     focusedGroupStart !== null
       ? getSubdivisionGroupInfo(focusedGroupStart, groupSubdivisionLengths).length
       : null
+  // Progressive rest expansion only applies to the armed/focused beat group.
+  // Non-focused groups default to quarter-rest granularity for a cleaner look.
   const focusedPlaceholderPlan =
     focusedGroupStart !== null && focusedGroupLength !== null
       ? buildProgressivePlaceholderPlan(
@@ -1408,6 +1490,7 @@ function buildStaffVoiceData(
       focusedGroupStart !== null &&
       subdivision >= focusedGroupStart &&
       subdivision < focusedGroupStart + groupInfo.length
+
     const progressivePlaceholderLength =
       isFocusedGroup && focusedPlaceholderPlan?.has(subdivision)
         ? focusedPlaceholderPlan.get(subdivision) ?? null
@@ -1487,29 +1570,6 @@ function resolveClosestSubdivision(xBySubdivision: number[], x: number) {
   return bestIndex
 }
 
-function getNoteExtents(length: number, hasFlag: boolean, dotted = false) {
-  const left = 10
-  let right = 14
-
-  if (length <= 2 || hasFlag) {
-    right = 18
-  } else if (length <= 4) {
-    right = 16
-  } else if (length >= 16) {
-    right = 12
-  }
-
-  if (dotted) {
-    right += 6
-  }
-
-  return { left, right }
-}
-
-function getRestExtents() {
-  return { left: 7, right: 7 }
-}
-
 function getStaffHitBounds(stave: Stave, staffId: StaffId) {
   const topLineY = stave.getYForLine(0)
   const spacing = stave.getSpacingBetweenLines()
@@ -1530,19 +1590,39 @@ function getPreviewExtents(
   previewBaseDuration: BaseDuration,
   previewDotted: boolean,
 ) {
-  return getNoteExtents(
-    getDurationSubdivisions(previewBaseDuration, previewDotted),
-    previewBaseDuration === '8' || previewBaseDuration === '16' || previewBaseDuration === '32',
-    previewDotted,
-  )
-}
+  const left = 10
+  let right = 14
 
-function getTickableExtents(note: StaveNote, length: number) {
-  if (note.isRest()) {
-    return getRestExtents()
+  switch (previewBaseDuration) {
+    case '16':
+    case '32':
+      right = 18
+      break
+    case '8':
+      right = 16
+      break
+    case 'h':
+    case 'w':
+      right = 12
+      break
+    default:
+      right = 14
   }
 
-  return getNoteExtents(length, note.hasFlag())
+  if (previewDotted) {
+    right += 6
+  }
+
+  return { left, right }
+}
+
+function getTickableHorizontalMetrics(note: StaveNote) {
+  const metrics = note.getMetrics()
+
+  return {
+    left: metrics.modLeftPx + metrics.leftDisplacedHeadPx,
+    right: metrics.notePx + metrics.rightDisplacedHeadPx + metrics.modRightPx,
+  }
 }
 
 function clampAnchorXToMeasure(
@@ -1581,20 +1661,15 @@ function clampPreviewX(
 function getPreviewXForSubdivisionRange(
   hitBox: Pick<MeasureHitBox, 'left' | 'right' | 'xBySubdivision'>,
   subdivision: number,
-  length: number,
   previewBaseDuration: BaseDuration,
   previewDotted: boolean,
 ) {
-  const lastSubdivision = Math.min(
-    subdivision + Math.max(length - 1, 0),
-    hitBox.xBySubdivision.length - 1,
-  )
-  const previewStartX =
-    hitBox.xBySubdivision[subdivision] ?? hitBox.xBySubdivision[0] ?? hitBox.left
-  const previewEndX = hitBox.xBySubdivision[lastSubdivision] ?? previewStartX
-
   return clampPreviewX(
-    (previewStartX + previewEndX) / 2 - NOTE_VISUAL_SHIFT,
+    getTickableAnchorX(
+      hitBox.xBySubdivision,
+      subdivision,
+      hitBox.left,
+    ),
     hitBox.left,
     hitBox.right,
     previewBaseDuration,
@@ -1649,6 +1724,18 @@ function applySystemStartFrontModifiers(
 
   trebleStave.addTimeSignature(timeSignature, timeSignaturePadding)
   bassStave.addTimeSignature(timeSignature, timeSignaturePadding)
+}
+
+function getLinkedGrandStaffGridBounds(
+  trebleStave: Stave,
+  bassStave: Stave,
+): GridBounds | null {
+  const startX = Math.max(trebleStave.getNoteStartX(), bassStave.getNoteStartX())
+  const endX = Math.min(trebleStave.getNoteEndX(), bassStave.getNoteEndX())
+
+  return endX - startX > GRID_EDGE_PADDING * 2
+    ? { endX, startX }
+    : null
 }
 
 function getSystemFrontGeometry(stave: Stave) {
@@ -1832,14 +1919,17 @@ function applyFixedSubdivisionGrid(
   groupUnits: number[],
   groupSubdivisionLengths: number[],
   noteAreaWidth: number,
+  gridBounds?: GridBounds | null,
 ) {
   const stavePadding = Metrics.get('Stave.padding', 0)
+  const gridStartX = gridBounds?.startX ?? stave.getNoteStartX()
+  const gridEndX = gridBounds?.endX ?? stave.getNoteEndX()
   const totalUnits = groupUnits.reduce((sum, units) => sum + units, 0)
   const usableWidth = Math.max(
     1,
     Math.min(
       noteAreaWidth,
-      stave.getNoteEndX() - stave.getNoteStartX(),
+      gridEndX - gridStartX,
     ) - GRID_EDGE_PADDING * 2,
   )
   const unitWidth = usableWidth / Math.max(totalUnits, 1)
@@ -1860,8 +1950,9 @@ function applyFixedSubdivisionGrid(
       groupOffset +
       subdivisionWidth * (subdivision - groupInfo.start) +
       subdivisionWidth / 2
-    const absoluteX = stave.getNoteStartX() + stavePadding + relativeX
-    note.getTickContext().setX(relativeX)
+    const absoluteX = gridStartX + stavePadding + relativeX
+    const tickX = absoluteX - stave.getNoteStartX() - stavePadding
+    note.getTickContext().setX(tickX)
     return absoluteX
   })
 }
@@ -1869,41 +1960,138 @@ function applyFixedSubdivisionGrid(
 function positionTickablesOnGrid(
   stave: Stave,
   notes: StaveNote[],
-  lengths: number[],
+  _lengths: number[],
   starts: number[],
   xBySubdivision: number[],
+  gridBounds?: GridBounds | null,
 ) {
   const stavePadding = Metrics.get('Stave.padding', 0)
+  const measureLeft = gridBounds?.startX ?? stave.getNoteStartX()
+  const measureRight = gridBounds?.endX ?? stave.getNoteEndX()
 
   notes.forEach((note, index) => {
     const subdivision = starts[index] ?? 0
-    const length = lengths[index] ?? 1
-    const lastSubdivision = Math.min(
-      subdivision + Math.max(length - 1, 0),
-      xBySubdivision.length - 1,
-    )
-    const startX = xBySubdivision[subdivision]
-    const endX = xBySubdivision[lastSubdivision]
-
-    if (startX === undefined || endX === undefined) {
-      return
-    }
-
     const anchorX =
-      (startX + endX) / 2 -
-      NOTE_VISUAL_SHIFT -
-      (note.isRest() ? REST_VISUAL_SHIFT : 0)
-    const { left, right } = getTickableExtents(note, length)
+      getTickableAnchorX(
+        xBySubdivision,
+        subdivision,
+        measureLeft,
+      )
+    const { left, right } = getTickableHorizontalMetrics(note)
     const clampedAnchorX = clampAnchorXToMeasure(
       anchorX,
-      stave.getNoteStartX(),
-      stave.getNoteEndX(),
+      measureLeft,
+      measureRight,
       left,
       right,
     )
     const relativeX = clampedAnchorX - stave.getNoteStartX() - stavePadding
     note.getTickContext().setX(relativeX)
   })
+}
+
+function getTickableAnchorX(
+  xBySubdivision: number[],
+  subdivision: number,
+  fallbackX: number,
+) {
+  return xBySubdivision[subdivision] ?? xBySubdivision[0] ?? fallbackX
+}
+
+function measureLyricTextWidth(
+  context: VexRenderContext,
+  text: string,
+  fontSize: number,
+) {
+  context.save()
+  context.setFont(LYRIC_FONT_FAMILY, fontSize, '400')
+  const width = context.measureText(text).width
+  context.restore()
+  return width
+}
+
+function renderLyricsToSvg(
+  svg: SVGSVGElement,
+  context: VexRenderContext,
+  lyricTokens: LyricLayoutToken[],
+) {
+  if (lyricTokens.length === 0) {
+    return
+  }
+
+  const lyricLayer = document.createElementNS(SVG_NS, 'g')
+  lyricLayer.setAttribute('data-layer', 'lyrics')
+
+  const systems = new Map<number, LyricLayoutToken[]>()
+  lyricTokens.forEach((token) => {
+    const normalizedText = token.text.replace(/\s+/g, ' ').trim()
+    if (!normalizedText) {
+      return
+    }
+
+    const existing = systems.get(token.systemIndex)
+    if (existing) {
+      existing.push({ ...token, text: normalizedText })
+      return
+    }
+
+    systems.set(token.systemIndex, [{ ...token, text: normalizedText }])
+  })
+
+  Array.from(systems.entries())
+    .sort(([left], [right]) => left - right)
+    .forEach(([, systemTokens]) => {
+      const sortedTokens = [...systemTokens].sort((left, right) => {
+        if (left.measureIndex !== right.measureIndex) {
+          return left.measureIndex - right.measureIndex
+        }
+        return left.anchorX - right.anchorX
+      })
+
+      sortedTokens.forEach((token, index) => {
+        const previous = sortedTokens[index - 1]
+        const next = sortedTokens[index + 1]
+        const segmentLeft =
+          previous && previous.measureIndex === token.measureIndex
+            ? Math.max(token.measureLeft, (previous.anchorX + token.anchorX) / 2)
+            : token.measureLeft
+        const segmentRight =
+          next && next.measureIndex === token.measureIndex
+            ? Math.min(token.measureRight, (token.anchorX + next.anchorX) / 2)
+            : token.measureRight
+        const availableWidth = Math.max(
+          LYRIC_MIN_SEGMENT_WIDTH,
+          segmentRight - segmentLeft - LYRIC_SEGMENT_PADDING * 2,
+        )
+
+        let fontSize = LYRIC_FONT_SIZE
+        let textWidth = measureLyricTextWidth(context, token.text, fontSize)
+
+        while (fontSize > LYRIC_MIN_FONT_SIZE && textWidth > availableWidth) {
+          fontSize -= 1
+          textWidth = measureLyricTextWidth(context, token.text, fontSize)
+        }
+
+        const textNode = document.createElementNS(SVG_NS, 'text')
+        textNode.setAttribute('x', String((segmentLeft + segmentRight) / 2))
+        textNode.setAttribute('y', String(token.y))
+        textNode.setAttribute('dominant-baseline', 'middle')
+        textNode.setAttribute('fill', NOTE_COLOR)
+        textNode.setAttribute('font-family', LYRIC_FONT_FAMILY)
+        textNode.setAttribute('font-size', String(fontSize))
+        textNode.setAttribute('text-anchor', 'middle')
+
+        if (textWidth > availableWidth) {
+          textNode.setAttribute('lengthAdjust', 'spacingAndGlyphs')
+          textNode.setAttribute('textLength', String(availableWidth))
+        }
+
+        textNode.textContent = token.text
+        lyricLayer.appendChild(textNode)
+      })
+    })
+
+  svg.appendChild(lyricLayer)
 }
 
 function HoverRestIndicator({
@@ -1966,12 +2154,10 @@ function PendingInsertIndicator({
       box.index === position.measureIndex &&
       box.staffId === position.staffId,
   )
-  const previewLength = getDurationSubdivisions(baseDuration, dotted)
   const previewX = hitBox
     ? getPreviewXForSubdivisionRange(
       hitBox,
       position.subdivision,
-      previewLength,
       baseDuration,
       dotted,
     )
@@ -2039,6 +2225,7 @@ function App() {
   const scoreContainerRef = useRef<HTMLElement | null>(null)
   const [availableScoreWidth, setAvailableScoreWidth] = useState(SYSTEM_WRAP_WIDTH)
   const tempoPanelRef = useRef<HTMLDivElement | null>(null)
+  const fileMenuRef = useRef<HTMLDivElement | null>(null)
   const hitBoxesRef = useRef<MeasureHitBox[]>([])
   const pianoRef = useRef<Tone.Sampler | null>(null)
   const pianoLoaderRef = useRef<Promise<Tone.Sampler> | null>(null)
@@ -2055,6 +2242,7 @@ function App() {
   const [timeSignature, setTimeSignature] = useState<TimeSignature>(isPdfRenderMode ? '4/4' : '3/4')
   const [timeSignatureGrouping, setTimeSignatureGrouping] = useState<number[] | null>(null)
   const [keySignature, setKeySignature] = useState<KeySignatureSpec>('C')
+  const [grandStaffLayoutMode, setGrandStaffLayoutMode] = useState<CompositionLayoutMode>('independent')
   const [transposeOnKeyChange, setTransposeOnKeyChange] = useState(false)
   const [activeTab, setActiveTab] = useState<ToolbarTab>('notes')
   const [mode, setMode] = useState<EditMode>('note')
@@ -2064,6 +2252,8 @@ function App() {
   const [tempoBpm, setTempoBpm] = useState(isPdfRenderMode ? 80 : 72)
   const [isMetronomeEnabled, setIsMetronomeEnabled] = useState(false)
   const [isTempoPanelOpen, setIsTempoPanelOpen] = useState(false)
+  const [isFileMenuOpen, setIsFileMenuOpen] = useState(false)
+  const [isInstructionsOpen, setIsInstructionsOpen] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
   const [eraseHoverItemId, setEraseHoverItemId] = useState<string | null>(null)
   const [placeholderFocus, setPlaceholderFocus] = useState<PlaceholderFocus | null>(
@@ -2098,7 +2288,12 @@ function App() {
   const [isImportingMusicXml, setIsImportingMusicXml] = useState(false)
   const [isPdfRenderJobReady, setIsPdfRenderJobReady] = useState(!isPdfRenderMode)
   const [exportDialog, setExportDialog] = useState<{ filename: string } | null>(null)
+  const [saveDialog, setSaveDialog] = useState<{ name: string } | null>(null)
+  const [savedCompositionSnapshot, setSavedCompositionSnapshot] = useState<SavedCompositionSnapshot | null>(
+    () => readSavedCompositionSnapshot(),
+  )
   const exportFilenameInputRef = useRef<HTMLInputElement | null>(null)
+  const saveFilenameInputRef = useRef<HTMLInputElement | null>(null)
   const importMusicXmlInputRef = useRef<HTMLInputElement | null>(null)
 
   const meterDefinition = useMemo(
@@ -2111,6 +2306,7 @@ function App() {
       timeSignature,
       timeSignatureGrouping,
       availableScoreWidth,
+      true,  // always align grand staff by beat
     ),
     [availableScoreWidth, measures, timeSignature, timeSignatureGrouping],
   )
@@ -2246,6 +2442,27 @@ function App() {
   }, [isTempoPanelOpen])
 
   useEffect(() => {
+    if (!isFileMenuOpen) {
+      return
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (
+        fileMenuRef.current &&
+        !fileMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsFileMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [isFileMenuOpen])
+
+  useEffect(() => {
     const container = scoreContainerRef.current
     if (!container) return
 
@@ -2342,6 +2559,7 @@ function App() {
     const context = renderer.getContext()
     const noteRegistry = new Map<string, { item: NoteItem; note: StaveNote }>()
     const hitBoxes: MeasureHitBox[] = []
+    const lyricTokens: LyricLayoutToken[] = []
     const renderedPdfSystemBounds: PdfSystemBound[] = []
 
     const targetSystemWidth = scoreWidth - SYSTEM_SIDE_PADDING * 2
@@ -2400,6 +2618,8 @@ function App() {
         bassStave.setContext(context).draw()
 
         const frontGeometry = isSystemStart ? getSystemFrontGeometry(trebleStave) : null
+        const linkedGridBounds =
+          getLinkedGrandStaffGridBounds(trebleStave, bassStave)
 
         if (isSystemStart) {
           new StaveConnector(trebleStave, bassStave)
@@ -2523,6 +2743,7 @@ function App() {
           entry.trebleGroupUnits,
           entry.groupSubdivisionLengths,
           entry.trebleNoteAreaWidth,
+          linkedGridBounds,
         )
         const bassXBySubdivision = applyFixedSubdivisionGrid(
           bassStave,
@@ -2530,6 +2751,7 @@ function App() {
           entry.bassGroupUnits,
           entry.groupSubdivisionLengths,
           entry.bassNoteAreaWidth,
+          linkedGridBounds,
         )
 
         positionTickablesOnGrid(
@@ -2538,6 +2760,7 @@ function App() {
           trebleData.lengths,
           trebleData.starts,
           trebleXBySubdivision,
+          linkedGridBounds,
         )
         positionTickablesOnGrid(
           bassStave,
@@ -2545,7 +2768,49 @@ function App() {
           bassData.lengths,
           bassData.starts,
           bassXBySubdivision,
+          linkedGridBounds,
         )
+
+        const trebleMeasureBounds = linkedGridBounds ?? {
+          endX: trebleStave.getNoteEndX(),
+          startX: trebleStave.getNoteStartX(),
+        }
+        const bassMeasureBounds = linkedGridBounds ?? {
+          endX: bassStave.getNoteEndX(),
+          startX: bassStave.getNoteStartX(),
+        }
+        const lyricY =
+          trebleStave.getYForLine(4) +
+          (bassStave.getYForLine(0) - trebleStave.getYForLine(4)) * LYRIC_BASELINE_BIAS
+
+        const collectLyricTokens = (
+          items: ScoreItem[],
+          xBySubdivision: number[],
+          measureBounds: GridBounds,
+        ) => {
+          items.forEach((item) => {
+            if (item.kind !== 'note' || !item.lyrics?.trim()) {
+              return
+            }
+
+            lyricTokens.push({
+              anchorX: getTickableAnchorX(
+                xBySubdivision,
+                item.start,
+                measureBounds.startX,
+              ),
+              measureIndex: entry.measureIndex,
+              measureLeft: measureBounds.startX,
+              measureRight: measureBounds.endX,
+              systemIndex,
+              text: item.lyrics,
+              y: lyricY,
+            })
+          })
+        }
+
+        collectLyricTokens(entry.measure.trebleItems, trebleXBySubdivision, trebleMeasureBounds)
+        collectLyricTokens(entry.measure.bassItems, bassXBySubdivision, bassMeasureBounds)
 
         const beamGroups = meterDefinition.grouping.map(
           (groupValue) => new Fraction(groupValue, meterDefinition.denominator),
@@ -2573,8 +2838,8 @@ function App() {
           hitBottom: trebleHitBounds.hitBottom,
           hitTop: trebleHitBounds.hitTop,
           index: entry.measureIndex,
-          left: trebleStave.getNoteStartX(),
-          right: trebleStave.getNoteEndX(),
+          left: trebleMeasureBounds.startX,
+          right: trebleMeasureBounds.endX,
           spacing: trebleStave.getSpacingBetweenLines(),
           staffId: 'treble',
           topLineY: trebleStave.getYForLine(0),
@@ -2585,8 +2850,8 @@ function App() {
           hitBottom: bassHitBounds.hitBottom,
           hitTop: bassHitBounds.hitTop,
           index: entry.measureIndex,
-          left: bassStave.getNoteStartX(),
-          right: bassStave.getNoteEndX(),
+          left: bassMeasureBounds.startX,
+          right: bassMeasureBounds.endX,
           spacing: bassStave.getSpacingBetweenLines(),
           staffId: 'bass',
           topLineY: bassStave.getYForLine(0),
@@ -2666,6 +2931,11 @@ function App() {
         .draw()
     })
 
+    const svg = host.querySelector('svg')
+    if (svg instanceof SVGSVGElement) {
+      renderLyricsToSvg(svg, context, lyricTokens)
+    }
+
     hitBoxesRef.current = hitBoxes
     pdfSystemBoundsRef.current = renderedPdfSystemBounds
   }, [
@@ -2674,6 +2944,7 @@ function App() {
     hoveredRestPosition,
     keySignature,
     measures,
+    selectedDurationLength,
     measureTempoTimeline,
     pendingInsertPreview,
     scoreHeight,
@@ -3419,7 +3690,14 @@ function App() {
           box.staffId === pendingInsertPreview.staffId,
       )
       const anchorX =
-        pendingHitBox?.xBySubdivision[pendingInsertPreview.subdivision]
+        pendingHitBox
+          ? getPreviewXForSubdivisionRange(
+            pendingHitBox,
+            pendingInsertPreview.subdivision,
+            baseDuration,
+            dotted,
+          )
+          : undefined
 
       if (
         pendingHitBox &&
@@ -3949,6 +4227,117 @@ function App() {
     clearHoverState()
   }
 
+  function startNewComposition() {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        'Start a new composition? Save locally first if you want to keep the current version available in this browser.',
+      )
+    ) {
+      setIsFileMenuOpen(false)
+      return
+    }
+
+    pianoRef.current?.releaseAll()
+    clearScheduledPlayback()
+    stopPlaybackVisuals()
+    setIsPlaying(false)
+    setTimeSignature(DEFAULT_NEW_COMPOSITION_TIME_SIGNATURE)
+    setTimeSignatureGrouping(null)
+    setKeySignature('C')
+    setGrandStaffLayoutMode('independent')
+    setMeasures(buildBlankMeasures())
+    setSlurs([])
+    setTempoBpm(DEFAULT_NEW_COMPOSITION_TEMPO)
+    setMeasureTempoInput(String(DEFAULT_NEW_COMPOSITION_TEMPO))
+    setTimeSignatureNumeratorInput('4')
+    setTimeSignatureDenominatorInput('4')
+    setTimeSignatureGroupingInput('')
+    clearPendingInsertPreview()
+    setPendingSlurSelection(null)
+    setScoreFrontPopover(null)
+    setActiveMeasureIndex(0)
+    setBaseDuration('8')
+    setDotted(false)
+    setAccidental(null)
+    setActiveTab('notes')
+    setHelpCard(getToolbarTabHelp('notes'))
+    setMode('note')
+    setActiveItemId(null)
+    setLyricsInput('')
+    setScoreTitle('')
+    setScoreSubtitle('')
+    setScoreComposer('')
+    setScoreLyricist('')
+    setScoreArranger('')
+    setExportDialog(null)
+    setSaveDialog(null)
+    setIsFileMenuOpen(false)
+    setIsInstructionsOpen(false)
+    clearHoverState()
+    setStatus('Started a new composition. Click a rest slot once to arm note insertion, then click again to place the note.')
+  }
+
+  function openSaveCompositionDialog() {
+    const defaultName = scoreTitle.trim() || 'Untitled Composition'
+    setIsFileMenuOpen(false)
+    setSaveDialog({ name: defaultName })
+    setTimeout(() => saveFilenameInputRef.current?.select(), 30)
+  }
+
+  function confirmSaveComposition(name: string) {
+    const title = name.trim() || 'Untitled Composition'
+
+    try {
+      const payload = buildScoreIoPayload()
+      const snapshot: SavedCompositionSnapshot = {
+        layoutMode: grandStaffLayoutMode,
+        payload,
+        savedAt: new Date().toISOString(),
+        title,
+        version: 1,
+      }
+
+      writeSavedCompositionSnapshot(snapshot)
+      setSavedCompositionSnapshot(snapshot)
+      setSaveDialog(null)
+      setStatus(`Saved composition locally as "${title}".`)
+    } catch (error) {
+      console.error('Save composition failed:', error)
+      setStatus(
+        error instanceof Error
+          ? `Failed to save composition: ${error.message}`
+          : 'Failed to save composition.',
+      )
+    }
+  }
+
+  function loadSavedComposition() {
+    const snapshot = readSavedCompositionSnapshot()
+    setIsFileMenuOpen(false)
+
+    if (!snapshot) {
+      setSavedCompositionSnapshot(null)
+      setStatus('No saved composition was found in this browser yet.')
+      return
+    }
+
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(
+        `Load saved composition "${snapshot.title}"? Current unsaved changes will be replaced.`,
+      )
+    ) {
+      return
+    }
+
+    setSavedCompositionSnapshot(snapshot)
+    applyImportedMusicXml(snapshot.payload, {
+      layoutMode: snapshot.layoutMode ?? snapshot.payload.layoutMode ?? 'independent',
+    })
+    setStatus(`Loaded saved composition "${snapshot.title}".`)
+  }
+
   function loadFurElise() {
     pianoRef.current?.releaseAll()
     clearScheduledPlayback()
@@ -3957,6 +4346,7 @@ function App() {
     setTimeSignature('3/4')
     setTimeSignatureGrouping(null)
     setKeySignature('C')
+    setGrandStaffLayoutMode('independent')
     setMeasures(createFurEliseMeasures())
     setSlurs([])
     setTempoBpm(72)
@@ -4019,6 +4409,7 @@ function App() {
     setTimeSignature(meta.timeSignature)
     setTimeSignatureGrouping(null)
     setKeySignature(meta.keySignature)
+    setGrandStaffLayoutMode('independent')
     setMeasures(createMeasuresFn())
     setSlurs([])
     setTempoBpm(meta.tempoBpm)
@@ -4047,7 +4438,7 @@ function App() {
     }
     setHelpCard({
       description: text
-        ? 'Lyrics attach text directly below the selected notehead.'
+        ? 'Lyrics attach to the selected note and render on the shared lyric line.'
         : 'Lyrics can be removed from the selected note without changing the notation.',
       title: text ? 'Apply Lyrics' : 'Clear Lyrics',
     })
@@ -4242,11 +4633,16 @@ function App() {
     setHoveredRestPosition(null)
   }
 
-  function applyImportedMusicXml(payload: MusicXmlScorePayload) {
+  function applyImportedMusicXml(
+    payload: CompositionIoPayload,
+    options?: { layoutMode?: CompositionLayoutMode },
+  ) {
     const importedMeter = parseTimeSignature(
       payload.timeSignature,
       payload.timeSignatureGrouping,
     )
+    const nextLayoutMode =
+      options?.layoutMode ?? payload.layoutMode ?? 'independent'
 
     pianoRef.current?.releaseAll()
     clearScheduledPlayback()
@@ -4255,6 +4651,7 @@ function App() {
     setTimeSignature(importedMeter.display)
     setTimeSignatureGrouping(payload.timeSignatureGrouping)
     setKeySignature(payload.keySignature)
+    setGrandStaffLayoutMode(nextLayoutMode)
     setMeasures(
       normalizeMeasures(payload.measures, importedMeter.subdivisionsPerMeasure, payload.keySignature),
     )
@@ -4289,9 +4686,10 @@ function App() {
     clearHoverState()
   }
 
-  function buildScoreIoPayload(): MusicXmlScorePayload {
+  function buildScoreIoPayload(): CompositionIoPayload {
     return {
       keySignature,
+      layoutMode: grandStaffLayoutMode,
       measures,
       scoreArranger,
       scoreComposer,
@@ -4323,12 +4721,14 @@ function App() {
           throw new Error('Backend PDF job could not be loaded.')
         }
 
-        const job = await response.json() as { filename: string; payload: MusicXmlScorePayload }
+        const job = await response.json() as { filename: string; payload: CompositionIoPayload }
         if (cancelled) {
           return
         }
 
-        applyImportedMusicXml(job.payload)
+        applyImportedMusicXml(job.payload, {
+          layoutMode: job.payload.layoutMode ?? 'independent',
+        })
         setIsPdfRenderJobReady(true)
         setStatus(`Rendering "${job.filename}.pdf"...`)
       } catch (error) {
@@ -4420,6 +4820,7 @@ function App() {
   ])
 
   function handleExportMusicXML() {
+    setIsFileMenuOpen(false)
     void (async () => {
       try {
         await exportMusicXMLViaBackend(buildScoreIoPayload())
@@ -4433,6 +4834,7 @@ function App() {
 
   function handleImportMusicXMLClick() {
     if (isImportingMusicXml) return
+    setIsFileMenuOpen(false)
     importMusicXmlInputRef.current?.click()
   }
 
@@ -4450,7 +4852,7 @@ function App() {
     try {
       const xml = await file.text()
       const payload = await importMusicXMLViaBackend(xml)
-      applyImportedMusicXml(payload)
+      applyImportedMusicXml(payload, { layoutMode: 'linked' })
       const warningSuffix =
         payload.warnings && payload.warnings.length > 0
           ? ` Imported with ${payload.warnings.length} warning(s); see console for details.`
@@ -4475,6 +4877,7 @@ function App() {
 
   function handleExportPDF() {
     if (isExporting) return
+    setIsFileMenuOpen(false)
     const defaultName = (scoreTitle || 'score').replace(/[^a-zA-Z0-9_\-\u00C0-\u024F\u4e00-\u9fff ]/g, '_').trim() || 'score'
     setExportDialog({ filename: defaultName })
     setTimeout(() => exportFilenameInputRef.current?.select(), 30)
@@ -4599,20 +5002,237 @@ function App() {
           </div>
         </div>
       )}
-      <header className="topbar">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            ♫
-          </div>
-          <div>
-            <div className="brand-title">Nifty Notes</div>
-            <div className="brand-subtitle">
-              Interactive grand staff piano composer
+      {saveDialog && (
+        <div
+          className="export-dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Save composition"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setSaveDialog(null)
+          }}
+        >
+          <div className="export-dialog">
+            <div className="export-dialog__header">
+              <span className="export-dialog__icon">Save</span>
+              <h2 className="export-dialog__title">Save composition</h2>
+            </div>
+            <p className="export-dialog__hint">
+              Enter a name for this composition. It will be saved locally in this browser.
+            </p>
+            <div className="export-dialog__field">
+              <input
+                ref={saveFilenameInputRef}
+                autoFocus
+                className="export-dialog__input"
+                maxLength={120}
+                onChange={(event) =>
+                  setSaveDialog((current) => (
+                    current ? { name: event.target.value } : current
+                  ))
+                }
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    confirmSaveComposition(saveDialog.name)
+                  }
+                }}
+                placeholder="Composition name"
+                type="text"
+                value={saveDialog.name}
+              />
+            </div>
+            <div className="export-dialog__actions">
+              <button
+                className="export-dialog__cancel"
+                onClick={() => setSaveDialog(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="export-dialog__confirm"
+                disabled={!saveDialog.name.trim()}
+                onClick={() => confirmSaveComposition(saveDialog.name)}
+                type="button"
+              >
+                Save Composition
+              </button>
             </div>
           </div>
         </div>
+      )}
+      {isInstructionsOpen ? (
+        <div
+          className="info-dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Instructions"
+          onClick={() => setIsInstructionsOpen(false)}
+        >
+          <div
+            className="info-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="info-dialog__header">
+              <div>
+                <h2>Instructions</h2>
+                <p>How to create, import, save, and export a composition.</p>
+              </div>
+              <button
+                className="info-dialog__close"
+                onClick={() => setIsInstructionsOpen(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="info-dialog__body">
+              <section className="info-dialog__section">
+                <h3>Starting a piece</h3>
+                <ul>
+                  <li>Use `NEW COMPOSITION` for a blank 4/4 score with a default tempo of 80 BPM.</li>
+                  <li>The current demo and gallery pieces remain editable after they load.</li>
+                  <li>Imported MusicXML files are shown with linked treble and bass beat alignment.</li>
+                </ul>
+              </section>
+
+              <section className="info-dialog__section">
+                <h3>Writing notes</h3>
+                <ul>
+                  <li>Choose a note value, then click a rest slot once to arm it and click again to place the note.</li>
+                  <li>Select an existing note to add articulations, ornaments, dynamics, lyrics, ties, or slurs.</li>
+                  <li>Click the time signature or key signature at the start of a system to change it directly on the score.</li>
+                </ul>
+              </section>
+
+              <section className="info-dialog__section">
+                <h3>Saving and loading</h3>
+                <ul>
+                  <li>Open `FILE` and choose `Save Composition` to store the current score locally in this browser.</li>
+                  <li>Choose `Open Saved Composition` to restore the last locally saved score.</li>
+                  <li>Local save keeps your title, tempo, notation, imported content, and current layout mode.</li>
+                </ul>
+              </section>
+
+              <section className="info-dialog__section">
+                <h3>Importing and exporting</h3>
+                <ul>
+                  <li>`Import File` accepts `.musicxml` and `.xml` files.</li>
+                  <li>`Export MusicXML` downloads the current score as MusicXML for notation software.</li>
+                  <li>`Export PDF` downloads a paginated PDF of the current score.</li>
+                </ul>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <header className="topbar">
+        <div className="brand">
+          <img
+            src="/logo-navigationx60.png"
+            alt="Nifty Notes"
+            className="brand-logo"
+          />
+          <img
+            src="/bird-waving.png"
+            alt=""
+            className="brand-bird"
+            aria-hidden="true"
+          />
+        </div>
 
         <div className="topbar-actions">
+          <button
+            className="secondary-pill secondary-pill--new"
+            onClick={startNewComposition}
+            type="button"
+          >
+            NEW COMPOSITION
+          </button>
+          <div className="file-menu" ref={fileMenuRef}>
+            <button
+              aria-expanded={isFileMenuOpen}
+              className={isFileMenuOpen ? 'secondary-pill active' : 'secondary-pill'}
+              onClick={() => {
+                setIsTempoPanelOpen(false)
+                setIsFileMenuOpen((current) => !current)
+              }}
+              type="button"
+            >
+              FILE
+            </button>
+            {isFileMenuOpen ? (
+              <div className="file-menu__panel">
+                <div className="file-menu__section">
+                  <button
+                    className="file-menu__item"
+                    onClick={startNewComposition}
+                    type="button"
+                  >
+                    New Composition
+                  </button>
+                  <button
+                    className="file-menu__item"
+                    onClick={openSaveCompositionDialog}
+                    type="button"
+                  >
+                    Save Composition
+                  </button>
+                  <button
+                    className="file-menu__item"
+                    onClick={loadSavedComposition}
+                    type="button"
+                  >
+                    Open Saved Composition
+                  </button>
+                  <div className="file-menu__meta">
+                    {savedCompositionSnapshot
+                      ? `Saved locally: ${savedCompositionSnapshot.title} · ${new Date(savedCompositionSnapshot.savedAt).toLocaleString()}`
+                      : 'No local save in this browser yet.'}
+                  </div>
+                </div>
+
+                <div className="file-menu__section">
+                  <button
+                    className="file-menu__item"
+                    disabled={isImportingMusicXml}
+                    onClick={handleImportMusicXMLClick}
+                    type="button"
+                  >
+                    {isImportingMusicXml ? 'Importing...' : 'Import File'}
+                  </button>
+                  <button
+                    className="file-menu__item"
+                    disabled={isImportingMusicXml}
+                    onClick={handleExportMusicXML}
+                    type="button"
+                  >
+                    Export MusicXML
+                  </button>
+                  <button
+                    className="file-menu__item"
+                    disabled={isExporting || isImportingMusicXml}
+                    onClick={handleExportPDF}
+                    type="button"
+                  >
+                    {isExporting ? 'Generating PDF...' : 'Export PDF'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <button
+            className={isInstructionsOpen ? 'secondary-pill active' : 'secondary-pill'}
+            onClick={() => {
+              setIsFileMenuOpen(false)
+              setIsInstructionsOpen(true)
+            }}
+            type="button"
+          >
+            INSTRUCTIONS
+          </button>
           <div className="selection-chip">
             <span className="selection-chip__label">Selected</span>
             <strong>{activeNoteLabel}</strong>
@@ -4624,7 +5244,10 @@ function App() {
             <button
               aria-expanded={isTempoPanelOpen}
               className={`tempo-chip${isTempoPanelOpen ? ' active' : ''}`}
-              onClick={() => setIsTempoPanelOpen((current) => !current)}
+              onClick={() => {
+                setIsFileMenuOpen(false)
+                setIsTempoPanelOpen((current) => !current)
+              }}
               type="button"
             >
               Default Tempo {tempoBpm} BPM
