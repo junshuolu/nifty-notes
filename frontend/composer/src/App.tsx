@@ -5102,12 +5102,6 @@ function App() {
             alt="Nifty Notes"
             className="brand-logo"
           />
-          <img
-            src="/bird-waving.png"
-            alt=""
-            className="brand-bird"
-            aria-hidden="true"
-          />
         </div>
 
         <div className="topbar-actions">
@@ -5253,6 +5247,12 @@ function App() {
           </button>
         </div>
       </header>
+      <img
+        src="/bird-waving.png"
+        alt=""
+        className="sidebar-mascot"
+        aria-hidden="true"
+      />
 
       <div className="toolbar-wrap">
         <div className="toolbar-shell">
