@@ -99,8 +99,6 @@ import {
   yToPitch,
 } from './composer/score'
 import { createFurEliseMeasures } from './composer/furElise'
-import { createRainMeasures, RAIN_META } from './composer/demos/rain'
-import { createFurEliseMeasuresNew, FUR_ELISE_META } from './composer/demos/furElise_new'
 import {
   exportMusicXMLViaBackend,
   exportPDFViaBackend,
@@ -190,9 +188,8 @@ const TOOLBAR_TABS: Array<{ id: ToolbarTab; label: string; hint: string }> = [
   { id: 'articulations', label: 'Articulations', hint: 'Apply touch and accent marks to the selected note.' },
   { id: 'ornaments', label: 'Ornaments', hint: 'Add trill and ornament symbols above the selected note.' },
   { id: 'dynamics', label: 'Dynamics', hint: 'Attach expressive dynamic markings to the selected note.' },
-  { id: 'bars', label: 'Bars', hint: 'Manage bars, meter, playback demo, and reset tools.' },
+  { id: 'bars', label: 'Bars', hint: 'Manage bars, meter, tempo, and reset tools.' },
   { id: 'text', label: 'Text', hint: 'Edit score title fields and lyrics for the selected note.' },
-  { id: 'gallery', label: '🎹 Gallery', hint: 'Load a piano masterpiece and start editing it.' },
   { id: 'export', label: 'Export', hint: 'Save the score as a PDF file.' },
 ]
 
@@ -360,7 +357,6 @@ const TAB_SELECTION_HINT: Record<Exclude<ToolbarTab, 'notes'>, string> = {
   bars: 'Click a measure in the score to target it, then set a tempo mark from the Measures toolbar.',
   dynamics: 'Click an existing note to choose where the dynamic marking should appear.',
   export: 'Use the button below to export the score as PDF — no note selection needed.',
-  gallery: 'Click a demo card to load that piece as your score.',
   ornaments: 'Click an existing note to add or remove an ornament.',
   text: 'Click an existing note to attach lyrics, or edit the score title block below.',
 }
@@ -389,11 +385,6 @@ const TAB_SIDEBAR_TIPS: Record<ToolbarTab, string[]> = {
     'Click any measure in the score to target that measure for tempo changes.',
     'Click the time signature or key signature at the front of a system to open its chooser directly on the score.',
     'Set a measure tempo to draw a metronome mark above that measure and change playback from there onward.',
-  ],
-  gallery: [
-    'Click any demo card to load that piano piece as your working score.',
-    'After loading, switch to the Notes tab to edit the score and add your own notes.',
-    'All 9 pieces are recognizable simplifications — you can extend them further.',
   ],
   text: [
     'Select a note to edit its lyric text, then apply or clear the lyric from the toolbar.',
@@ -633,10 +624,6 @@ const BAR_ACTION_HELP = {
   clear: {
     description: 'Clear removes all notes and rests from the score while leaving an editable blank page.',
     title: 'Clear Score',
-  },
-  demo: {
-    description: 'Demo reloads the Fur Elise sample so you can inspect notation behavior and playback quickly.',
-    title: 'Demo Score',
   },
   remove: {
     description: 'Remove Measure deletes the last measure, but always leaves at least one measure on the page.',
@@ -4338,37 +4325,6 @@ function App() {
     setStatus(`Loaded saved composition "${snapshot.title}".`)
   }
 
-  function loadFurElise() {
-    pianoRef.current?.releaseAll()
-    clearScheduledPlayback()
-    stopPlaybackVisuals()
-    setIsPlaying(false)
-    setTimeSignature('3/4')
-    setTimeSignatureGrouping(null)
-    setKeySignature('C')
-    setGrandStaffLayoutMode('independent')
-    setMeasures(createFurEliseMeasures())
-    setSlurs([])
-    setTempoBpm(72)
-    clearPendingInsertPreview()
-    setPendingSlurSelection(null)
-    setScoreFrontPopover(null)
-    setActiveMeasureIndex(0)
-    setBaseDuration('8')
-    setActiveTab('notes')
-    setHelpCard(getToolbarTabHelp('notes'))
-    setMode('note')
-    setActiveItemId(null)
-    setScoreTitle('F\u00fcr Elise')
-    setScoreSubtitle('')
-    setScoreComposer('Ludwig van Beethoven')
-    setScoreLyricist('')
-    setScoreArranger('')
-    clearHoverState()
-    setHelpCard(BAR_ACTION_HELP.demo)
-    setStatus('Loaded demo: Fur Elise (A theme). Press Play to listen!')
-  }
-
   function clearScore() {
     pianoRef.current?.releaseAll()
     clearScheduledPlayback()
@@ -4387,48 +4343,6 @@ function App() {
     setHelpCard(BAR_ACTION_HELP.clear)
     clearHoverState()
     setStatus('Score cleared. The blue teardrop now marks the next insert position.')
-  }
-
-  function loadDemo(
-    createMeasuresFn: () => MeasureData[],
-    meta: {
-      arranger: string
-      composer: string
-      keySignature: KeySignatureSpec
-      lyricist: string
-      subtitle: string
-      tempoBpm: number
-      timeSignature: TimeSignature
-      title: string
-    },
-  ) {
-    pianoRef.current?.releaseAll()
-    clearScheduledPlayback()
-    stopPlaybackVisuals()
-    setIsPlaying(false)
-    setTimeSignature(meta.timeSignature)
-    setTimeSignatureGrouping(null)
-    setKeySignature(meta.keySignature)
-    setGrandStaffLayoutMode('independent')
-    setMeasures(createMeasuresFn())
-    setSlurs([])
-    setTempoBpm(meta.tempoBpm)
-    clearPendingInsertPreview()
-    setPendingSlurSelection(null)
-    setScoreFrontPopover(null)
-    setActiveMeasureIndex(0)
-    setBaseDuration('8')
-    setActiveTab('notes')
-    setHelpCard(getToolbarTabHelp('notes'))
-    setMode('note')
-    setActiveItemId(null)
-    setScoreTitle(meta.title)
-    setScoreSubtitle(meta.subtitle)
-    setScoreComposer(meta.composer)
-    setScoreLyricist(meta.lyricist)
-    setScoreArranger(meta.arranger)
-    clearHoverState()
-    setStatus(`Loaded: ${meta.title}${meta.composer ? ` \u2014 ${meta.composer}` : ''}. Press Play to listen!`)
   }
 
   function applyLyrics(text: string) {
@@ -5093,7 +5007,7 @@ function App() {
                 <h3>Starting a piece</h3>
                 <ul>
                   <li>Use `NEW COMPOSITION` for a blank 4/4 score with a default tempo of 80 BPM.</li>
-                  <li>The current demo and gallery pieces remain editable after they load.</li>
+                  <li>Use `FILE` to reopen a saved composition or import a MusicXML file into the current editor.</li>
                   <li>Imported MusicXML files are shown with linked treble and bass beat alignment.</li>
                 </ul>
               </section>
@@ -5479,14 +5393,11 @@ function App() {
                     </button>
                   </div>
 
-                  <div className="tool-group compact">
-                    <span className="group-label">Score</span>
-                    <button className="tool" onClick={loadFurElise} title="Load Fur Elise Demo" type="button">
-                      🎹 Demo
-                    </button>
-                    <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
-                      Clear
-                    </button>
+                <div className="tool-group compact">
+                  <span className="group-label">Score</span>
+                  <button className="tool tool--ghost" onClick={clearScore} title="Clear all notes" type="button">
+                    Clear
+                  </button>
                   </div>
                 </>
               ) : null}
@@ -5617,30 +5528,6 @@ function App() {
                   </button>
                   <div className="toolbar-note">
                     Edit the large title block directly above the staff. Changes update live.
-                  </div>
-                </div>
-              ) : null}
-
-              {activeTab === 'gallery' ? (
-                <div className="tool-group tool-group--gallery">
-                  <span className="group-label">Piano Masterpieces</span>
-                  <div className="gallery-grid">
-                    {[
-                      { factory: createFurEliseMeasuresNew, meta: FUR_ELISE_META },
-                      { factory: createRainMeasures, meta: RAIN_META },
-                    ].map((demo) => (
-                      <button
-                        key={demo.meta.title}
-                        className="gallery-card"
-                        onClick={() => loadDemo(demo.factory, demo.meta)}
-                        type="button"
-                      >
-                        <span className="gallery-card__title">{demo.meta.title}</span>
-                        {demo.meta.subtitle && <span className="gallery-card__sub">{demo.meta.subtitle}</span>}
-                        <span className="gallery-card__composer">{demo.meta.composer}</span>
-                        <span className="gallery-card__meta">{demo.meta.timeSignature} · {demo.meta.tempoBpm} BPM · Key: {demo.meta.keySignature}</span>
-                      </button>
-                    ))}
                   </div>
                 </div>
               ) : null}

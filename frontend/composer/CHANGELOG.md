@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-04-18
+
+### Gallery Removal and Documentation Refresh
+
+- Removed the composer `Gallery` tab, its help text, and its demo-piece loading branch from the active toolbar workflow.
+- Removed the two bundled gallery demo score sources so the editor no longer carries unused sample-piece data.
+- Updated the composer instructions and README to reflect the current entry points: `NEW COMPOSITION`, saved composition reopen, MusicXML import, export, and PDF generation.
+- Added `PROJECT_OVERVIEW.md` to give future AI/dev handoffs a concise map of the composer architecture, state ownership, and safe change areas.
+
+### Verification
+
+- `frontend/composer`: `npm run build`
+
 ## 2026-04-17
 
 ### MusicXML Import Alignment and Lyrics

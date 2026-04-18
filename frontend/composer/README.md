@@ -15,10 +15,16 @@ The editor runs in the browser, while import/export services are now unified in 
 - Grand staff score editing with treble and bass staves
 - Note, rest, tie, slur, articulation, ornament, lyric, and dynamic editing
 - Time signature changes, custom grouping, bar tempo, and metronome playback
-- Built-in gallery demos
+- Blank-score creation plus local composition reopen/save flows
 - MusicXML import through backend parsing
 - MusicXML export through backend generation
 - Backend PDF export with A4 pagination
+
+## AI / Maintainer Orientation
+
+- Start with [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md) for the current architecture, state model, and safe edit entry points.
+- The active editor surface is driven by `src/App.tsx`; backend import/export and PDF responsibilities live under `backend/`.
+- The legacy `frontend/composer/server/musicxml-import-server.cjs` path is informational only and is not part of the active runtime.
 
 ## Project Structure
 
@@ -125,6 +131,12 @@ The pagination logic is system-based rather than measure-based.
 - `frontend/composer/server/musicxml-import-server.cjs` is legacy and no longer part of the active runtime.
 - The active backend entry is `backend/server.mjs`.
 - The active MusicXML implementation lives in `backend/musicxml.mjs`.
+
+## Suggested Next README Additions
+
+- Deployment and environment-variable setup for shared environments.
+- A short screenshot-based workflow guide for `NEW COMPOSITION`, `FILE`, and PDF export.
+- A concise testing checklist beyond `npm run build`, especially for MusicXML round-trip checks.
 
 ## Latest Frontend Editing Fixes
 

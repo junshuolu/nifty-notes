@@ -31,7 +31,6 @@ export type ToolbarTab =
   | 'dynamics'
   | 'bars'
   | 'text'
-  | 'gallery'
   | 'export'
 
 export const MAX_UNDO_HISTORY = 50

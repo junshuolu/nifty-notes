@@ -1128,15 +1128,6 @@
   color: #51627f;
 }
 
-button[title='Load Fur Elise Demo'] {
-  font-size: 0;
-}
-
-button[title='Load Fur Elise Demo']::before {
-  content: 'Demo';
-  font-size: 1rem;
-}
-
 .tool--symbol {
   display: inline-flex;
   align-items: center;
@@ -1521,58 +1512,6 @@ button[title='Load Fur Elise Demo']::before {
   }
 }
 
-.gallery-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
-  margin-top: 16px;
-}
-
-.gallery-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  border: 1px solid #ccc;
-  background: white;
-  padding: 16px 20px;
-  gap: 8px;
-  cursor: pointer;
-  border-radius: 0;
-  transition: box-shadow 0.2s;
-}
-
-.gallery-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  border-color: #999;
-}
-
-.gallery-card__title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #222;
-}
-
-.gallery-card__sub {
-  font-size: 0.95rem;
-  color: #555;
-  font-style: italic;
-}
-
-.gallery-card__composer {
-  font-size: 0.9rem;
-  color: #666;
-  margin-top: 4px;
-}
-
-.gallery-card__meta {
-  font-size: 0.8rem;
-  color: #888;
-  margin-top: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
 
 /* ━━━ Tool variants: ghost, io, import ━━━ */
 .tool--ghost {
