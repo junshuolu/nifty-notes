@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-04-19
+
+### Sidebar Mascot and Brand Logo Adjustment
+
+- Moved the rainbow parrot from the top-bar brand area into a fixed-position sidebar mascot on the left margin of the page.
+- The parrot is now vertically centred in the viewport and stays in place regardless of score scrolling (`position: fixed`).
+- The parrot scales with the viewport width via `clamp(140px, 14vw, 280px)` so it grows and shrinks naturally with page zoom.
+- The mascot is hidden on viewports narrower than 1320 px where the left margin would be too narrow.
+- Added a gentle entrance animation and continuous floating animation to the mascot.
+- Adjusted the Nifty Notes brand logo `min-width` to avoid over-stretching the image.
+- To change the parrot size in the future, edit the `width` property in the `.sidebar-mascot` rule at the bottom of `App.css`.
+
+### Verification
+
+- `frontend/composer`: `npm run build`
+
 ## 2026-04-18
 
 ### Gallery Removal and Documentation Refresh
