@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-04-22
+
+### Title Placeholder Copy Update
+
+- Replaced the default empty score-title placeholder text `No title provided` with `ADD TITLE` so students have a clearer prompt when naming a song.
+
+### Verification
+
+- `frontend/composer`: `npm run build`
+
 ## 2026-04-19
 
 ### Sidebar Mascot and Brand Logo Adjustment

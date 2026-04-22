@@ -5755,7 +5755,7 @@ function App() {
                 aria-label="Score title"
                 className={`score-title-input${scoreTitle ? '' : ' is-empty'}`}
                 onChange={(event) => setScoreTitle(event.target.value)}
-                placeholder="No title provided"
+                placeholder="ADD TITLE"
                 type="text"
                 value={scoreTitle}
               />
