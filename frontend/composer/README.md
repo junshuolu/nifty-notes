@@ -10,6 +10,14 @@ The editor runs in the browser, while import/export services are now unified in 
 - MusicXML export: frontend sends the current score payload, backend generates `.musicxml`.
 - PDF export: frontend sends the current score payload, backend launches a headless browser, renders the score page, paginates by system, and returns a downloadable PDF.
 
+## Live Deployment
+
+The current deployed project is available at:
+
+```text
+http://8.210.93.101:3001/
+```
+
 ## Current Features
 
 - Grand staff score editing with treble and bass staves
@@ -20,7 +28,7 @@ The editor runs in the browser, while import/export services are now unified in 
 - MusicXML export through backend generation
 - Backend PDF export with A4 pagination
 
-## AI / Maintainer Orientation
+## Maintainer Orientation
 
 - Start with [PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md) for the current architecture, state model, and safe edit entry points.
 - The active editor surface is driven by `src/App.tsx`; backend import/export and PDF responsibilities live under `backend/`.
@@ -44,7 +52,7 @@ frontend/composer/
 - Node.js 20+
 - A local Chrome or Edge installation
 
-Backend PDF export looks for Chrome or Edge in standard Windows install paths. If your browser is installed elsewhere, set `CHROME_EXECUTABLE_PATH`.
+Backend PDF export looks for Chrome, Chromium, or Edge in standard Windows, macOS, and common Linux install paths. If your browser is installed elsewhere, set `CHROME_EXECUTABLE_PATH`.
 
 ## Install
 
@@ -96,6 +104,61 @@ cd frontend/composer
 npm run build
 ```
 
+## Deploy to a Shared Linux Server
+
+Production should run `backend/server.mjs`, not `pm2 serve dist`, because the backend now serves both the built frontend and the `/api/*` endpoints.
+
+Typical deployment flow:
+
+1. Build the frontend locally:
+
+```bash
+cd frontend/composer
+npm install
+npm run build
+```
+
+2. Copy these paths to the server while preserving the repo layout:
+   - `backend/` source files
+   - `frontend/composer/dist/`
+
+   Do not reuse a Windows `backend/node_modules` directory on Linux. Install backend dependencies on the server instead.
+
+3. On the server, install backend dependencies:
+
+```bash
+cd /path/to/repo/backend
+npm ci --omit=dev
+```
+
+4. Ensure Chrome, Chromium, or Edge is installed for PDF export. If it lives outside the standard path set, export `CHROME_EXECUTABLE_PATH` before starting PM2.
+
+5. Start the backend with PM2:
+
+```bash
+cd /path/to/repo/backend
+pm2 start ecosystem.config.cjs
+```
+
+6. For later updates, rebuild `frontend/composer/dist`, sync the changed backend files and `dist/`, then run:
+
+```bash
+cd /path/to/repo/backend
+pm2 restart nifty-notes
+```
+
+7. Verify locally on the server:
+
+```bash
+curl http://127.0.0.1:3001
+```
+
+Public deployment URL:
+
+```text
+http://8.210.93.101:3001/
+```
+
 ## Backend API
 
 - `POST /api/musicxml/import`
@@ -132,12 +195,6 @@ The pagination logic is system-based rather than measure-based.
 - The active backend entry is `backend/server.mjs`.
 - The active MusicXML implementation lives in `backend/musicxml.mjs`.
 
-## Suggested Next README Additions
-
-- Deployment and environment-variable setup for shared environments.
-- A short screenshot-based workflow guide for `NEW COMPOSITION`, `FILE`, and PDF export.
-- A concise testing checklist beyond `npm run build`, especially for MusicXML round-trip checks.
-
 ## Latest Frontend Editing Fixes
 
 - Chord insertion hover now aligns with the actual selected note slot, which avoids the visual drift that previously appeared on the note to the right.
@@ -163,7 +220,7 @@ npm run build:frontend
 ## Known Limitations
 
 - PDF pagination and cropping are still being tuned for edge cases like dense notation and very tight inter-system spacing.
-- PDF export depends on a local Chrome or Edge executable being available to the backend.
+- PDF export depends on a Chrome, Chromium, or Edge executable being available to the backend.
 - The backend serves the built frontend for PDF jobs, so stale `dist/` output can cause old PDF behavior if the frontend was changed but not rebuilt.
 
 ## Latest Terminology and Key-Signature Updates
