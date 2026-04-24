@@ -16,6 +16,9 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 const FRONTEND_DIST_DIR = path.resolve(REPO_ROOT, 'frontend', 'composer', 'dist')
 const PORT = Number.parseInt(process.env.PORT ?? '8787', 10)
 const HOST = process.env.HOST ?? '127.0.0.1'
+const INTERNAL_HOST = process.env.INTERNAL_HOST
+  ?? (HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST)
+const INTERNAL_ORIGIN = `http://${INTERNAL_HOST}:${PORT}`
 
 const STATIC_MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -135,13 +138,30 @@ async function serveStaticAsset(res, pathname) {
 }
 
 function findChromeExecutable() {
-  const candidates = [
-    process.env.CHROME_EXECUTABLE_PATH,
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  ].filter(Boolean)
+  const platformCandidates = process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      ]
+    : process.platform === 'darwin'
+      ? [
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        ]
+      : [
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+          '/opt/google/chrome/chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          '/snap/bin/chromium',
+          '/usr/bin/microsoft-edge-stable',
+          '/usr/bin/microsoft-edge',
+        ]
+
+  const candidates = [process.env.CHROME_EXECUTABLE_PATH, ...platformCandidates].filter(Boolean)
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
@@ -149,7 +169,20 @@ function findChromeExecutable() {
     }
   }
 
-  throw new Error('No Chrome or Edge executable was found for backend PDF export.')
+  throw new Error(
+    'No Chrome, Chromium, or Edge executable was found for backend PDF export. '
+      + 'Install a browser or set CHROME_EXECUTABLE_PATH.',
+  )
+}
+
+function getBrowserLaunchArgs() {
+  const args = ['--disable-gpu', '--font-render-hinting=medium']
+
+  if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
+    args.push('--no-sandbox', '--disable-setuid-sandbox')
+  }
+
+  return args
 }
 
 async function buildPrintablePdfLayout(page, options) {
@@ -489,7 +522,7 @@ async function renderPdfViaHeadlessBrowser(jobId, job) {
   const browser = await puppeteer.launch({
     executablePath: findChromeExecutable(),
     headless: true,
-    args: ['--disable-gpu', '--font-render-hinting=medium'],
+    args: getBrowserLaunchArgs(),
   })
 
   try {
@@ -501,7 +534,7 @@ async function renderPdfViaHeadlessBrowser(jobId, job) {
     })
     page.setDefaultNavigationTimeout(120000)
     page.setDefaultTimeout(120000)
-    await page.goto(`http://${HOST}:${PORT}/?pdfJob=${encodeURIComponent(jobId)}`, {
+    await page.goto(`${INTERNAL_ORIGIN}/?pdfJob=${encodeURIComponent(jobId)}`, {
       waitUntil: 'domcontentloaded',
       timeout: 120000,
     })
@@ -550,7 +583,7 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  const url = new URL(req.url, `http://${HOST}:${PORT}`)
+  const url = new URL(req.url, INTERNAL_ORIGIN)
   const pathname = url.pathname
 
   if (req.method === 'OPTIONS') {

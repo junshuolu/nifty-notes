@@ -1,5 +1,9 @@
 # Changelog
 
+## English Translation Version
+
+This changelog is maintained as the English translated version of the project history. The original changelog entries are preserved in place below; no historical content has been removed.
+
 ## 2026-04-22
 
 ### Title Placeholder Copy Update
