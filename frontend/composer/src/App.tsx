@@ -3382,7 +3382,8 @@ function App() {
         if (accidental && !pitchExists) {
           matchingStartItem.accidentals = { ...matchingStartItem.accidentals, [pitch]: accidental }
         } else if (pitchExists && matchingStartItem.accidentals) {
-          const { [pitch]: _, ...rest } = matchingStartItem.accidentals
+          const rest = { ...matchingStartItem.accidentals }
+          delete rest[pitch]
           matchingStartItem.accidentals = Object.keys(rest).length > 0 ? rest : undefined
         }
 

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "font:bravura": "node scripts/convert-bravura.mjs"
+    "font:bravura": "node scripts/convert-bravura.mjs",
+    "test": "node test/score.test.mjs"
   },
   "dependencies": {
     "canvg": "^4.0.3",

@@ -5,7 +5,7 @@
  * Tempo recommendation: ~72 BPM in 3/4 ≈ original Andante feel.
  */
 
-import { type MeasureData, type ScoreItem, generateId } from './constants'
+import { type MeasureData, type NoteItem, type ScoreItem, generateId } from './constants'
 
 type N = { p: string; d: '8' | 'q' | 'h'; s: number; acc?: Record<string, '#' | 'b' | 'n'> }
 type R = { d: '8' | 'q' | 'h'; s: number }
@@ -21,7 +21,7 @@ function r(duration: '8' | 'q' | 'h', start: number): R {
 function buildItems(notes: (N | R)[]): ScoreItem[] {
   return notes.map((item) => {
     if ('p' in item) {
-      const base: ScoreItem = {
+      const base: NoteItem = {
         id: generateId(),
         kind: 'note',
         baseDuration: item.d,
@@ -30,7 +30,7 @@ function buildItems(notes: (N | R)[]): ScoreItem[] {
         pitches: [item.p],
       }
       if (item.acc) {
-        (base as any).accidentals = item.acc
+        base.accidentals = item.acc
       }
       return base
     }
@@ -47,7 +47,7 @@ function buildItems(notes: (N | R)[]): ScoreItem[] {
 function buildChordItems(notes: Array<{ pitches: string[]; d: '8' | 'q' | 'h'; s: number; acc?: Record<string, '#' | 'b' | 'n'> } | R>): ScoreItem[] {
   return notes.map((item) => {
     if ('pitches' in item) {
-      const base: ScoreItem = {
+      const base: NoteItem = {
         id: generateId(),
         kind: 'note',
         baseDuration: item.d,
@@ -56,7 +56,7 @@ function buildChordItems(notes: Array<{ pitches: string[]; d: '8' | 'q' | 'h'; s
         pitches: item.pitches,
       }
       if (item.acc) {
-        (base as any).accidentals = item.acc
+        base.accidentals = item.acc
       }
       return base
     }

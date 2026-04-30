@@ -663,7 +663,7 @@ function parseDownloadFilename(contentDisposition: string | null, fallbackFilena
     }
   }
 
-  const plainMatch = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition)
+  const plainMatch = /filename="?([^";]+)"?/i.exec(contentDisposition)
   return plainMatch?.[1] ?? fallbackFilename
 }
 
